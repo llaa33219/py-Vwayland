@@ -1,0 +1,11 @@
+[package]
+name = "vwayland-test-client"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Minimal wayland client used by py-Vwayland integration tests (not shipped)"
+
+[dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+libc = "0.2"

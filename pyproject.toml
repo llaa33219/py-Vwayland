@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "py-Vwayland"
+version = "0.1.0"
+description = "Spawn virtual Wayland compositors from Python to capture and control GUI programs"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [
+    { name = "py-Vwayland Authors" },
+]
+keywords = ["wayland", "compositor", "headless", "automation", "screenshot", "gui-testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Hardware",
+]
+# Runtime dependencies: none (standard library only). The compositor binary and
+# native libraries are bundled in the wheel.
+dependencies = []
+
+[project.optional-dependencies]
+# Required for screenshot().to_pil()
+pillow = ["Pillow>=9.0"]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+vwayland = "vwayland.cli:main"
+
+[project.urls]
+Documentation = "https://github.com/py-Vwayland/py-Vwayland/tree/main/docs"
+Source = "https://github.com/py-Vwayland/py-Vwayland"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vwayland"]
+# Native binaries/libs are gitignored, so always include them via force-include.
+# (force-include + .gitkeep placeholder so the build works even when empty)
+[tool.hatch.build.targets.wheel.force-include]
+"src/vwayland/_native" = "vwayland/_native"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/vwayland",
+    "rust",
+    "scripts",
+    "docs",
+    "tests",
+    "LICENSE",
+    "README.md",
+    "AGENTS.md",
+    "pyproject.toml",
+]

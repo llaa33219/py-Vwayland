@@ -1,0 +1,22 @@
+[package]
+name = "vwayland-compositor"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Virtual Wayland compositor for py-Vwayland (headless pixman / windowed winit)"
+
+[dependencies]
+smithay = { version = "0.7.0", default-features = false, features = [
+    "backend_winit",
+    "wayland_frontend",
+    "desktop",
+    "renderer_gl",
+    "renderer_pixman",
+] }
+pixman = "0.2.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+png = "0.17"
+libc = "0.2"

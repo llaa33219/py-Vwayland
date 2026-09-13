@@ -1,0 +1,85 @@
+name: release
+
+# Tag push (vX.Y.Z) triggers a PyPI release via Trusted Publishing (OIDC, no token).
+# One-time PyPI setup is required: a "pending publisher" for this repo/workflow/
+# environment (see docs/development.md).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build compositor, test, and build distributions
+    runs-on: ubuntu-latest
+    # Build on manylinux_2_28 so the bundled binary works on glibc >= 2.28.
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: yum install -y pkg-config pixman-devel libxkbcommon-devel
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)
+          echo "tag=$TAG package=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG does not match pyproject.toml version $PKG"
+            exit 1
+          fi
+
+      - name: Build compositor and bundle native libraries
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH"
+          python -m pip install --upgrade pip
+          command -v patchelf || python -m pip install patchelf
+          python scripts/build_compositor.py
+
+      - name: Run tests
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH"
+          python -m unittest discover -s tests -v
+
+      - name: Build sdist and wheel
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH"
+          python -m pip install build
+          python -m build
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI (Trusted Publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/py-Vwayland
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
