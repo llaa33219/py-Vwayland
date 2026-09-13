@@ -38,15 +38,16 @@ test = ["pytest>=7.0"]
 vwayland = "vwayland.cli:main"
 
 [project.urls]
-Documentation = "https://github.com/py-Vwayland/py-Vwayland/tree/main/docs"
-Source = "https://github.com/py-Vwayland/py-Vwayland"
+Documentation = "https://github.com/llaa33219/py-Vwayland/tree/main/docs"
+Source = "https://github.com/llaa33219/py-Vwayland"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vwayland"]
-# Native binaries/libs are gitignored, so always include them via force-include.
-# (force-include + .gitkeep placeholder so the build works even when empty)
+# The native binary/libs are gitignored, so pull them in explicitly.
+# Build fails loudly when they are missing (run scripts/build_compositor.py first).
 [tool.hatch.build.targets.wheel.force-include]
-"src/vwayland/_native" = "vwayland/_native"
+"src/vwayland/_native/vwayland-compositor" = "vwayland/_native/vwayland-compositor"
+"src/vwayland/_native/lib" = "vwayland/_native/lib"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -60,3 +61,8 @@ include = [
     "AGENTS.md",
     "pyproject.toml",
 ]
+# `python -m build` builds the wheel from the sdist, so the native artifacts
+# must be present in the sdist as well (same force-include as the wheel).
+[tool.hatch.build.targets.sdist.force-include]
+"src/vwayland/_native/vwayland-compositor" = "src/vwayland/_native/vwayland-compositor"
+"src/vwayland/_native/lib" = "src/vwayland/_native/lib"
