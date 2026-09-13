@@ -23,6 +23,29 @@ with vwayland.spawn(width=1280, height=720, headless=True) as comp:
     comp.key("enter")
 ```
 
+## Installation
+
+```console
+$ pip install py-vwayland
+```
+
+The wheel bundles the compositor binary and its native libraries, so headless
+mode works out of the box on any x86_64 Linux with glibc ≥ 2.28 — no display
+server, GPU, or extra packages required. For `screenshot().to_pil()`:
+
+```console
+$ pip install py-vwayland[pillow]
+```
+
+Quick sanity check:
+
+```console
+$ python3 -c "import vwayland; c = vwayland.spawn(); print(c.info()); c.kill()"
+```
+
+Building from source and platform details (windowed mode, musl, other
+architectures): see [docs/installation.md](docs/installation.md).
+
 ## Key features
 
 - Create/list/terminate compositors (`spawn`, `list`, `kill`)

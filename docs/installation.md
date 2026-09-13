@@ -16,7 +16,7 @@
 ### Wheel (recommended)
 
 ```console
-$ pip install py-Vwayland
+$ pip install py-vwayland
 ```
 
 The wheel bundles:
@@ -31,7 +31,7 @@ The wheel bundles:
 For Pillow integration:
 
 ```console
-$ pip install py-Vwayland[pillow]   # required for screenshot().to_pil()
+$ pip install py-vwayland[pillow]   # required for screenshot().to_pil()
 ```
 
 ### From source
