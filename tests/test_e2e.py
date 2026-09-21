@@ -14,6 +14,7 @@ Requirements:
 from __future__ import annotations
 
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -201,6 +202,24 @@ class VwaylandE2E(unittest.TestCase):
             self.assertIn("pointer_axis", text)
             self.assertIn("key 30 ", text)  # KEY_A (evdev code delivered unchanged)
             self.assertIn("key 48 ", text)  # KEY_B
+
+    @unittest.skipIf(shutil.which("dbus-daemon") is None, "dbus-daemon not found")
+    def test_private_dbus_session_bus(self) -> None:
+        with self.vw.spawn(width=320, height=240, headless=True) as comp:
+            comp.launch(["sh", "-c", 'echo "BUS=$DBUS_SESSION_BUS_ADDRESS"'])
+            log = comp.runtime_dir / "app.log"
+            addr = None
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and addr is None:
+                if log.exists():
+                    for line in log.read_text().splitlines():
+                        if line.startswith("BUS=") and len(line) > 4:
+                            addr = line[4:]
+                            break
+                time.sleep(0.1)
+            self.assertIsNotNone(addr)
+            self.assertTrue(addr.startswith(f"unix:path={comp.runtime_dir}/bus"))
+            self.assertNotEqual(addr, os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
 
     def test_double_launch_rejected(self) -> None:
         with self.vw.spawn(width=320, height=240, headless=True) as comp:

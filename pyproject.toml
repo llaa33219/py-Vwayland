@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "py-Vwayland"
-version = "0.1.0"
+version = "0.1.1"
 description = "Spawn virtual Wayland compositors from Python to capture and control GUI programs"
 readme = "README.md"
 license = "Apache-2.0"

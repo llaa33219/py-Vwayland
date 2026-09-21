@@ -1,6 +1,6 @@
 [package]
 name = "vwayland-compositor"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Virtual Wayland compositor for py-Vwayland (headless pixman / windowed winit)"

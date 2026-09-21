@@ -9,12 +9,24 @@ Sources live in `rust/vwayland-compositor/`.
 | File | Role |
 |---|---|
 | `src/main.rs` | Argument parsing, runtime directory setup, calloop event loop, timers (60Hz frame / 200ms app reaper) |
-| `src/state.rs` | Compositor state (space, output, seat, smithay globals), app process launch/close/reap |
+| `src/state.rs` | Compositor state (space, output, seat, smithay globals), app process launch/close/reap, private D-Bus session bus |
 | `src/handlers.rs` | smithay protocol handlers (compositor, xdg_shell, seat, shm, output, data_device) |
 | `src/inject.rs` | IPC input injection (synthesized pointer/keyboard events) + host input handling in windowed mode |
 | `src/headless.rs` | Headless backend: pixman software rendering, CPU-buffer screenshots |
 | `src/windowed.rs` | Windowed backend: winit + GLES2, offscreen-texture screenshots |
 | `src/ipc.rs` | ipc.sock JSON-line protocol server, PNG encoding |
+
+## App environment
+
+- At startup the compositor forks a private `dbus-daemon --session` listening
+  on `<runtime_dir>/bus`, and launched apps get its address as
+  `DBUS_SESSION_BUS_ADDRESS`. Without this isolation, single-instance apps
+  (Firefox, GApplication/KDBusService-based apps) would talk to the host
+  session bus and open their windows in an already-running instance on the
+  host compositor. If `dbus-daemon` is not installed, the variable is removed
+  from the app's environment instead (a warning is logged).
+- The daemon is SIGTERM'd when the compositor exits gracefully; the socket
+  file is removed with the instance directory in any case.
 
 ## Run modes
 

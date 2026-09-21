@@ -90,7 +90,10 @@ if the executable does not exist. The app's stdout/stderr are appended to
 
 The app receives `WAYLAND_DISPLAY` (this compositor's socket) and
 `XDG_RUNTIME_DIR` (the instance directory); `DISPLAY` is removed (prevents X11
-fallback).
+fallback). `DBUS_SESSION_BUS_ADDRESS` points to the compositor's private
+session bus (`<runtime_dir>/bus`), so single-instance apps (e.g. Firefox) open
+inside this compositor rather than activating a window on the host desktop.
+Without `dbus-daemon` on the system, the variable is unset instead.
 
 ### 3. Close the program
 

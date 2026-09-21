@@ -32,6 +32,56 @@ pub struct AppProc {
     pub term_deadline: Option<Instant>,
 }
 
+/// A private D-Bus session bus owned by this compositor instance.
+///
+/// Without one, apps inherit the outer session's DBUS_SESSION_BUS_ADDRESS and
+/// single-instance apps (Firefox, GApplication/KDBusService-based apps) get
+/// activated in their already-running instance on the host compositor instead
+/// of opening a window here.
+pub struct SessionBus {
+    pub address: String,
+    pid: i32,
+}
+
+impl SessionBus {
+    /// Returns None when dbus-daemon is unavailable or fails to start.
+    fn start(runtime_dir: &Path) -> Option<Self> {
+        let address = format!("unix:path={}", runtime_dir.join("bus").display());
+        let out = Command::new("dbus-daemon")
+            .args([
+                "--session",
+                "--fork",
+                "--print-address=1",
+                "--print-pid=1",
+                &format!("--address={address}"),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut lines = text.lines();
+        let address = lines.next()?.trim().to_string();
+        let pid: i32 = lines.next()?.trim().parse().ok()?;
+        if address.is_empty() || pid <= 0 {
+            return None;
+        }
+        info!(%address, pid, "started private D-Bus session bus");
+        Some(Self { address, pid })
+    }
+}
+
+impl Drop for SessionBus {
+    fn drop(&mut self) {
+        unsafe {
+            libc::kill(self.pid, libc::SIGTERM);
+        }
+    }
+}
+
 pub struct Vwayland {
     pub id: String,
     pub runtime_dir: PathBuf,
@@ -45,6 +95,7 @@ pub struct Vwayland {
     pub output: Output,
     pub popups: PopupManager,
     pub app: Option<AppProc>,
+    pub session_bus: Option<SessionBus>,
 
     // Smithay global state
     pub compositor_state: CompositorState,
@@ -108,6 +159,11 @@ impl Vwayland {
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
 
+        let session_bus = SessionBus::start(runtime_dir);
+        if session_bus.is_none() {
+            warn!("dbus-daemon unavailable; apps will run without a session bus");
+        }
+
         Self {
             id: id.to_string(),
             runtime_dir: runtime_dir.to_path_buf(),
@@ -120,6 +176,7 @@ impl Vwayland {
             output,
             popups,
             app: None,
+            session_bus,
             compositor_state,
             xdg_shell_state,
             shm_state,
@@ -255,8 +312,16 @@ impl Vwayland {
         cmd.args(&argv[1..])
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_RUNTIME_DIR", &self.runtime_dir)
-            .env_remove("DISPLAY") // prevent X11 fallback (no XWayland support)
-            .envs(env)
+            .env_remove("DISPLAY"); // prevent X11 fallback (no XWayland support)
+        match &self.session_bus {
+            Some(bus) => {
+                cmd.env("DBUS_SESSION_BUS_ADDRESS", &bus.address);
+            }
+            None => {
+                cmd.env_remove("DBUS_SESSION_BUS_ADDRESS");
+            }
+        }
+        cmd.envs(env)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
             .stderr(Stdio::from(log_err));

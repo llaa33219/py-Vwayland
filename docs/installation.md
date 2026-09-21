@@ -10,6 +10,7 @@
 | glibc | The bundled binary requires the build machine's glibc or newer (releases should target glibc 2.28) |
 | Display server | **Headless mode: not required** / windowed mode: a Wayland or X11 session + EGL/GLES2 |
 | GPU | **Headless mode: not required** (pixman CPU rendering) / windowed mode: host GL |
+| dbus-daemon | Optional. If present, each compositor runs a private session bus so single-instance apps (Firefox, GApplication apps) open inside the compositor; if absent, apps run without a session bus |
 
 ## Installation
 

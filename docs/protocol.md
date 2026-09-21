@@ -44,6 +44,11 @@ Unparseable requests also get a `{"ok": false, ...}` response.
 - `cwd` (optional, default null): working directory.
 - If an app is already running: `{"ok": false, "error": "an app is already running..."}`.
 - The app receives `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`; `DISPLAY` is removed.
+- `DBUS_SESSION_BUS_ADDRESS` is pointed at the compositor's private session bus
+  (a per-instance `dbus-daemon` listening on `<runtime_dir>/bus`), so
+  single-instance apps (Firefox, GApplication/KDBusService apps) open their
+  windows here instead of activating an instance running on the host session.
+  If `dbus-daemon` is unavailable, the variable is removed instead.
 
 ### close_app
 

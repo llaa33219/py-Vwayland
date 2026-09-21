@@ -23,7 +23,8 @@
                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ GUI app (one per compositor, fullscreen)                     │
-│  WAYLAND_DISPLAY=wayland-N, XDG_RUNTIME_DIR=<instance dir>   │
+│  WAYLAND_DISPLAY=wayland-N, XDG_RUNTIME_DIR=<instance dir>,  │
+│  DBUS_SESSION_BUS_ADDRESS=unix:path=<instance dir>/bus       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,6 +36,7 @@ Each compositor corresponds 1:1 to a directory.
 $VWAYLAND_RUNTIME_DIR (or $XDG_RUNTIME_DIR/vwayland, $TMPDIR/vwayland-<uid>)
 └── <id>/                     (mode 0700)
     ├── wayland-1             Wayland server socket (+ wayland-1.lock)
+    ├── bus                   Private D-Bus session bus socket (dbus-daemon)
     ├── ipc.sock              Control socket (JSON-line protocol)
     ├── compositor.pid        Compositor pid
     ├── compositor.log        Compositor log (RUST_LOG)
