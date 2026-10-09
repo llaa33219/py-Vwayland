@@ -178,7 +178,47 @@ Keys are given by name (table below) or evdev key code as int.
 A `key_` prefix (e.g. `"KEY_ENTER"`) is also accepted. Unknown names raise
 `VwaylandError`.
 
-### 9. Kill a compositor
+### 9. Clipboard and paste text
+
+#### `comp.paste_text(text, restore=True, restore_delay=0.15) -> None`
+
+Types text by **pasting it from the clipboard**, which works for any language
+(Korean, emoji, accented text, ...) without an IME.
+
+Sequence: back up the clipboard → set it to `text` → press Ctrl+V → wait
+`restore_delay` seconds (the app needs a moment to request the paste data) →
+put the previous clipboard content back.
+
+| Argument | Description |
+|---|---|
+| `text` | The text to paste. Any Unicode |
+| `restore` | `True` (default): put the backed-up clipboard content back (cleared again if it was empty). `False`: leave `text` in the clipboard |
+| `restore_delay` | Seconds to wait between Ctrl+V and the restore. `0.0` skips the wait |
+
+The restore is content-identical: the backed-up text is set again. Use
+`restore=False` when the app keeps reading the clipboard afterwards.
+
+Unlike `type_text()`, which types the text with the keyboard, `paste_text()`
+sends it through the clipboard, so it also works in fields that block pasting.
+
+#### Clipboard primitives
+
+| Method | Description |
+|---|---|
+| `comp.clipboard_get() -> str \| None` | Current clipboard text, or `None` when there is no selection |
+| `comp.clipboard_set(text) -> None` | Replace the clipboard content (any Unicode) |
+| `comp.clipboard_clear() -> None` | Clear the clipboard |
+
+```python
+comp.click(512, 100)                 # focus a text field
+comp.type_text("안녕하세요")         # Korean, if the keyboard layout has it
+comp.paste_text("안녕하세요")         # Korean via clipboard paste
+comp.clipboard_set("plain text")     # keep it in the clipboard
+print(comp.clipboard_get())          # "plain text"
+comp.clipboard_clear()
+```
+
+### 10. Kill a compositor
 
 #### `comp.kill(timeout=5.0) -> None`
 
@@ -228,6 +268,7 @@ with vwayland.spawn(width=1024, height=768, headless=True) as comp:
 
     comp.click(512, 100)               # click a button near the top
     comp.type_text("search terms here")
+    comp.paste_text("안녕하세요")        # any language, incl. Korean (clipboard)
     comp.key("enter")
     comp.scroll(dy=-5)                 # 5 detents down
 

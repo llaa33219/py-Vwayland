@@ -3,16 +3,19 @@
 //! - Draws a solid-color (RRGGBB, default ff0000) fullscreen shm buffer.
 //! - Prints "VWTEST ..." lines to stdout for received pointer/keyboard events.
 //! - Prints "VWTEST ready <w>x<h>" after the first draw.
+//! - Prints "VWTEST clipboard <text>" / "VWTEST clipboard-cleared" for selections.
 //!
 //! Usage: vwayland-test-client [RRGGBB]
+
+mod clipboard;
 
 use std::ffi::CString;
 use std::os::unix::io::BorrowedFd;
 
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_compositor, wl_data_device_manager, wl_keyboard, wl_pointer, wl_registry, wl_seat,
+    wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -25,6 +28,7 @@ struct AppState {
     /// 0xRRGGBB
     color: u32,
     drawn: bool,
+    clipboard: clipboard::Clipboard,
 }
 
 impl AppState {
@@ -95,6 +99,7 @@ delegate_noop!(AppState: ignore wl_shm::WlShm);
 delegate_noop!(AppState: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(AppState: ignore wl_buffer::WlBuffer);
 delegate_noop!(AppState: ignore wl_surface::WlSurface);
+delegate_noop!(AppState: ignore wl_data_device_manager::WlDataDeviceManager);
 
 impl Dispatch<xdg_wm_base::XdgWmBase, ()> for AppState {
     fn event(
@@ -254,7 +259,12 @@ fn main() {
     let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).expect("no shm");
     let xdg: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).expect("no xdg_wm_base");
     let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).expect("no seat");
-    let _ = &seat; // capability events are handled in Dispatch
+
+    let data_device_manager: wl_data_device_manager::WlDataDeviceManager = globals
+        .bind(&qh, 1..=3, ())
+        .expect("no data device manager");
+    // The proxy stays alive in the connection; events keep arriving on it.
+    let _data_device = data_device_manager.get_data_device(&seat, &qh, ());
 
     let surface = compositor.create_surface(&qh, ());
     let xdg_surface = xdg.get_xdg_surface(&surface, &qh, ());
@@ -269,6 +279,7 @@ fn main() {
         height: 0,
         color,
         drawn: false,
+        clipboard: clipboard::Clipboard::new(),
     };
 
     // Roundtrip once to receive the seat capabilities event
@@ -276,5 +287,8 @@ fn main() {
 
     loop {
         queue.blocking_dispatch(&mut state).expect("dispatch failed");
+        // The compositor only writes into the pipe after receiving these
+        // requests, so they can be queued from the handler but never flushed there.
+        state.clipboard.flush_pending(&queue);
     }
 }

@@ -89,6 +89,33 @@ def _build_parser() -> argparse.ArgumentParser:
     tp.add_argument("id")
     tp.add_argument("text")
 
+    pas = sub.add_parser(
+        "paste", help="paste text via clipboard (any language, e.g. Korean)"
+    )
+    pas.add_argument("id")
+    pas.add_argument("text")
+    pas.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="leave the pasted text in the clipboard instead of restoring the backup",
+    )
+    pas.add_argument(
+        "--restore-delay",
+        type=float,
+        default=0.15,
+        help="seconds between Ctrl+V and the clipboard restore (default: 0.15)",
+    )
+
+    cgp = sub.add_parser("clipboard-get", help="print the clipboard text")
+    cgp.add_argument("id")
+
+    csp = sub.add_parser("clipboard-set", help="set the clipboard text")
+    csp.add_argument("id")
+    csp.add_argument("text")
+
+    ccp = sub.add_parser("clipboard-clear", help="clear the clipboard")
+    ccp.add_argument("id")
+
     hp = sub.add_parser("set-headless", help="toggle headless mode (app is terminated)")
     hp.add_argument("id")
     hp.add_argument("mode", choices=["on", "off"])
@@ -156,6 +183,19 @@ def main(argv: "list[str] | None" = None) -> int:
             core.connect(args.id).combo(*args.keys)
         elif args.action == "type":
             core.connect(args.id).type_text(args.text)
+        elif args.action == "paste":
+            core.connect(args.id).paste_text(
+                args.text,
+                restore=not args.no_restore,
+                restore_delay=args.restore_delay,
+            )
+        elif args.action == "clipboard-get":
+            text = core.connect(args.id).clipboard_get()
+            print("" if text is None else text)
+        elif args.action == "clipboard-set":
+            core.connect(args.id).clipboard_set(args.text)
+        elif args.action == "clipboard-clear":
+            core.connect(args.id).clipboard_clear()
         elif args.action == "set-headless":
             core.connect(args.id).set_headless(args.mode == "on")
         elif args.action == "ping":

@@ -394,6 +394,59 @@ class Compositor:
         finally:
             self._rpc({"cmd": "key", "code": shift, "pressed": False})
 
+    # ---- clipboard ----
+
+    def clipboard_get(self) -> "str | None":
+        """Return the clipboard text, or None when there is no selection.
+
+        Raises ProtocolError if the compositor reports an error response.
+        """
+        resp = self._rpc({"cmd": "clipboard_get"})
+        text = resp.get("text")
+        return None if text is None else str(text)
+
+    def clipboard_set(self, text: str) -> None:
+        """Put text in the clipboard (replacing the current selection).
+
+        Any Unicode is accepted, including non-ASCII text such as Korean.
+        """
+        self._rpc({"cmd": "clipboard_set", "text": str(text)})
+
+    def clipboard_clear(self) -> None:
+        """Clear the clipboard (drop the current selection)."""
+        self._rpc({"cmd": "clipboard_clear"})
+
+    def paste_text(
+        self, text: str, restore: bool = True, restore_delay: float = 0.15
+    ) -> None:
+        """Type text by pasting it from the clipboard (works for any language).
+
+        Sequence: back up the clipboard, set it to `text`, press Ctrl+V, wait
+        `restore_delay` seconds for the app to request the paste data, then
+        put the previous clipboard content back.
+
+        Unlike type_text(), which types the text with the keyboard, this works
+        even when the app blocks pasting: the text travels through the
+        clipboard instead.
+
+        - `restore=True` (default): the backed-up content is put back
+          (content-identical restore; the clipboard is cleared again if it was
+          empty).
+        - `restore=False`: `text` stays in the clipboard.
+        - `restore_delay`: seconds to wait between Ctrl+V and the restore.
+          Use `0.0` to skip the wait.
+        """
+        backup = self.clipboard_get()
+        self.clipboard_set(text)
+        self.combo("ctrl", "v")
+        if restore_delay > 0:
+            time.sleep(restore_delay)
+        if restore:
+            if backup:
+                self.clipboard_set(backup)
+            else:
+                self.clipboard_clear()
+
     # ---- lifecycle ----
 
     def kill(self, timeout: float = 5.0) -> None:

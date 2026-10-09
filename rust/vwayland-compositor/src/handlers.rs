@@ -20,7 +20,7 @@ use smithay::wayland::selection::data_device::{
     set_data_device_focus, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
     ServerDndGrabHandler,
 };
-use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
@@ -30,6 +30,9 @@ use smithay::{
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
     delegate_xdg_shell,
 };
+use std::os::unix::io::OwnedFd;
+use std::sync::Arc;
+use tracing::warn;
 
 use crate::state::{ClientState, Vwayland};
 
@@ -218,11 +221,61 @@ impl SeatHandler for Vwayland {
 delegate_seat!(Vwayland);
 
 //
-// Data Device (bound for clipboard/DnD protocol completeness; no external integration)
+// Data Device (clipboard selection; DnD grabs are bound but unused)
 //
 
 impl SelectionHandler for Vwayland {
-    type SelectionUserData = ();
+    /// Payload of a compositor-owned clipboard selection: the raw UTF-8 bytes
+    /// handed to the app by `send_selection`.
+    type SelectionUserData = Arc<[u8]>;
+
+    fn new_selection(
+        &mut self,
+        _ty: SelectionTarget,
+        _source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        // Observation hook for app-owned selections. The text itself is read on
+        // demand (clipboard_get), so there is nothing to track here.
+    }
+
+    fn send_selection(
+        &mut self,
+        _ty: SelectionTarget,
+        _mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        user_data: &Arc<[u8]>,
+    ) {
+        let data = user_data.clone();
+        // This runs on the event loop, so the write must not happen here: a
+        // blocking write to a client that never reads would freeze the whole
+        // compositor.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let mut file = std::fs::File::from(fd);
+            // Wayland clients pass O_NONBLOCK fds in wl_data_source.send.
+            // write_all() then bails out after a partial write, silently
+            // truncating the selection (same bug class as WayVR's), so the flag
+            // is cleared first.
+            clear_nonblocking(&file);
+            if let Err(e) = file.write_all(&data) {
+                warn!(error = %e, "clipboard write to client failed");
+            }
+        });
+    }
+}
+
+/// Clear `O_NONBLOCK` on `file` (see `send_selection`).
+fn clear_nonblocking(file: &std::fs::File) {
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    // SAFETY: fcntl with F_GETFL/F_SETFL only reads and writes the fd's status
+    // flags; both calls are infallible on a valid fd.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags >= 0 {
+        unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) };
+    }
 }
 
 impl DataDeviceHandler for Vwayland {

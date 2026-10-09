@@ -55,6 +55,7 @@ architectures): see [docs/installation.md](docs/installation.md).
 - Capture the screen (`screenshot` → PNG)
 - Mouse move/click/drag/scroll (`move_to`, `click`, `drag`, `scroll`)
 - Keyboard input (`key`, `combo`, `type_text`)
+- Clipboard and Unicode text paste (`clipboard_get`/`clipboard_set`/`clipboard_clear`, `paste_text`)
 
 ## Documentation
 

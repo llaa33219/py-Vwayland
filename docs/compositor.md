@@ -11,6 +11,7 @@ Sources live in `rust/vwayland-compositor/`.
 | `src/main.rs` | Argument parsing, runtime directory setup, calloop event loop, timers (60Hz frame / 200ms app reaper) |
 | `src/state.rs` | Compositor state (space, output, seat, smithay globals), app process launch/close/reap, private D-Bus session bus |
 | `src/handlers.rs` | smithay protocol handlers (compositor, xdg_shell, seat, shm, output, data_device) |
+| `src/clipboard.rs` | Clipboard selection: set/get/clear over IPC, including the pending-read state machine |
 | `src/inject.rs` | IPC input injection (synthesized pointer/keyboard events) + host input handling in windowed mode |
 | `src/headless.rs` | Headless backend: pixman software rendering, CPU-buffer screenshots |
 | `src/windowed.rs` | Windowed backend: winit + GLES2, offscreen-texture screenshots |
@@ -69,8 +70,37 @@ Sources live in `rust/vwayland-compositor/`.
 
 - `wl_compositor` (including subsurfaces), `wl_shm`
 - `xdg_wm_base` (toplevel/popup), `xdg_output`
-- `wl_seat` (pointer, keyboard), `wl_data_device` (for seat protocol completeness)
+- `wl_seat` (pointer, keyboard), `wl_data_device` (clipboard selection:
+  compositor-side set/get/clear via IPC)
 - `wl_output`
+
+## Clipboard
+
+The clipboard is the one selection this compositor implements. It is exposed
+through the IPC commands `clipboard_set` / `clipboard_get` / `clipboard_clear`
+(see [protocol.md](protocol.md)) and lives in `src/clipboard.rs`.
+
+- **Selection ownership.** `SelectionHandler::SelectionUserData` is
+  `Arc<[u8]>`. `clipboard_set` calls `set_data_device_selection()` with the
+  mime types `text/plain;charset=utf-8` and `text/plain`; setting a selection
+  cancels a previous app-owned one, and `clipboard_clear` calls
+  `clear_data_device_selection()`.
+- **Serving a selection (`send_selection`).** Runs on the event loop, so the
+  pipe write happens on a spawned thread. The fd the app passes to
+  `wl_data_offer.receive` is O_NONBLOCK, and `write_all()` on a nonblocking fd
+  stops after a partial write and silently truncates the selection, so
+  `O_NONBLOCK` is cleared with `fcntl(F_SETFL)` before writing.
+- **Reading an app-owned selection (`clipboard_get`).** The compositor hands
+  the app a pipe via `request_data_device_client_selection()` and has to wait
+  for the app to answer the resulting `wl_data_source.send`. That wait cannot
+  block the event loop — the app would never be dispatched and every read
+  would burn the full timeout — so the pipe is polled by a timer that also
+  flushes the wayland clients between reads, and the IPC connection is answered
+  when the pipe reaches EOF. The wait is bounded to 5s.
+  A compositor-owned selection needs no round-trip at all: its bytes are read
+  straight from the user data via `current_data_device_selection_userdata()`.
+- The primary selection (middle-click) is not implemented, and nothing is
+  shared with the host clipboard.
 
 ## Limitations
 
@@ -81,7 +111,9 @@ Sources live in `rust/vwayland-compositor/`.
 | xdg-decoration | Not supported. Clients draw their own decorations (CSD) |
 | dmabuf / linux-dmabuf | Not advertised. GL clients must fall back to the shm path |
 | Scale (HiDPI) | Fixed at 1 |
-| DnD/clipboard integration with the outside | None (the protocol is bound but nothing is exchanged externally) |
+| Clipboard | Clipboard selection is supported inside the compositor (IPC `clipboard_set` / `clipboard_get` / `clipboard_clear`). Nothing is exchanged with the *outside* — there is no host clipboard sync. Text/plain only |
+| Primary selection | **Not supported** (middle-click selection) |
+| DnD | Not implemented. `wl_data_device` is bound, but drag and drop is never started |
 | Frame rate | Fixed 60Hz timer in headless mode |
 
 This list evolves with the implementation. If it diverges from the code, fix
@@ -118,6 +150,8 @@ tests (not shipped).
   default red).
 - Prints `VWTEST ...` lines to stdout for received pointer/keyboard events.
 - Prints `VWTEST ready <w>x<h>` after the first draw.
+- Prints `VWTEST clipboard <text>`, `VWTEST clipboard-cleared`,
+  `VWTEST clipboard-timeout`, `VWTEST clipboard-failed` for selections.
 
-`tests/test_e2e.py` uses this client to verify rendering (screenshot color) and
-input delivery.
+`tests/test_e2e.py` uses this client to verify rendering (screenshot color),
+input delivery, and clipboard transfer.

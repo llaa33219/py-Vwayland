@@ -107,6 +107,15 @@ def read_png_center(path_or_bytes) -> "tuple[int, int, tuple[int, int, int, int]
     return w, h, tuple(out[o : o + 4])
 
 
+def wait_for_log(log: Path, needle: str, timeout: float = 10.0, interval: float = 0.1) -> str:
+    deadline = time.monotonic() + timeout
+    while True:
+        text = log.read_text() if log.exists() else ""
+        if needle in text or time.monotonic() >= deadline:
+            return text
+        time.sleep(interval)
+
+
 @unittest.skipIf(COMPOSITOR is None, "vwayland-compositor binary not found")
 class VwaylandE2E(unittest.TestCase):
     def setUp(self) -> None:
@@ -202,6 +211,67 @@ class VwaylandE2E(unittest.TestCase):
             self.assertIn("pointer_axis", text)
             self.assertIn("key 30 ", text)  # KEY_A (evdev code delivered unchanged)
             self.assertIn("key 48 ", text)  # KEY_B
+
+    def test_clipboard_set_get_roundtrip(self) -> None:
+        with self.vw.spawn(width=320, height=240, headless=True) as comp:
+            comp.clipboard_set("안녕하세요 hello")
+            self.assertEqual(comp.clipboard_get(), "안녕하세요 hello")
+            comp.clipboard_clear()
+            self.assertIsNone(comp.clipboard_get())
+
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_clipboard_observed_by_client(self) -> None:
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.clipboard_set("안녕하세요")
+            text = wait_for_log(log, "VWTEST clipboard 안녕하세요")
+            self.assertIn("VWTEST clipboard 안녕하세요", text)
+
+            comp.clipboard_clear()
+            text = wait_for_log(log, "VWTEST clipboard-cleared")
+            self.assertIn("VWTEST clipboard-cleared", text)
+
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_paste_text_restores_backup(self) -> None:
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.clipboard_set("기존 내용")
+            self.assertIn("VWTEST clipboard 기존 내용", wait_for_log(log, "VWTEST clipboard 기존 내용"))
+
+            comp.paste_text("새 텍스트")
+            self.assertEqual(comp.clipboard_get(), "기존 내용")
+
+            pasted_line = "VWTEST clipboard 새 텍스트"
+            restored_line = "VWTEST clipboard 기존 내용"
+            self.assertIn(pasted_line, wait_for_log(log, pasted_line))
+
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                text = log.read_text()
+                if text.rfind(restored_line) > text.find(pasted_line):
+                    break
+                time.sleep(0.1)
+            text = log.read_text()
+            self.assertGreater(text.rfind(restored_line), text.find(pasted_line))
+
+    def test_paste_text_no_restore(self) -> None:
+        with self.vw.spawn(width=320, height=240, headless=True) as comp:
+            comp.clipboard_set("기존")
+            comp.paste_text("새 텍스트", restore=False)
+            self.assertEqual(comp.clipboard_get(), "새 텍스트")
+
+    def test_paste_text_empty_backup_clears(self) -> None:
+        with self.vw.spawn(width=320, height=240, headless=True) as comp:
+            comp.clipboard_clear()
+            self.assertIsNone(comp.clipboard_get())
+            comp.paste_text("새 텍스트")
+            self.assertIsNone(comp.clipboard_get())
 
     @unittest.skipIf(shutil.which("dbus-daemon") is None, "dbus-daemon not found")
     def test_private_dbus_session_bus(self) -> None:

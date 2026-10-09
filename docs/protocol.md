@@ -125,6 +125,54 @@ Unparseable requests also get a `{"ok": false, ...}` response.
   The compositor converts it to the xkb convention (+8) internally, so clients
   receive the evdev code unchanged.
 
+### clipboard_set
+
+```json
+→ {"cmd": "clipboard_set", "text": "안녕하세요"}
+← {"ok": true}
+```
+
+- `text`: UTF-8 text, stored and served verbatim (byte-exact, any Unicode).
+- The compositor takes ownership of the selection and offers it to the focused
+  app as `text/plain;charset=utf-8` and `text/plain`. When the app pastes, the
+  bytes are written into the pipe of its `wl_data_offer.receive`.
+- Replaces any previous selection. A selection owned by the app is cancelled
+  (`wl_data_source.cancelled`).
+- This is the way to feed text that has no keyboard mapping (Korean, emoji,
+  CJK, ...) **through the clipboard**: the app pastes it.
+
+### clipboard_get
+
+```json
+→ {"cmd": "clipboard_get"}
+← {"ok": true, "text": "안녕하세요"}
+```
+
+```json
+→ {"cmd": "clipboard_get"}
+← {"ok": true, "text": null}
+```
+
+- Returns the current clipboard text: the compositor-owned selection (set with
+  `clipboard_set`), or the selection owned by the running app.
+- `text` is `null` when there is no selection at all.
+- Reading an app-owned selection needs a round-trip with the app, so this
+  command can take up to 5s; on timeout it fails with
+  `{"ok": false, "error": "clipboard_get timed out after 5s"}`. The event loop
+  keeps running while waiting, so the app is dispatched normally.
+- While a read is in flight, a second `clipboard_get` fails immediately with
+  `"error": "another clipboard_get is still in flight"`.
+
+### clipboard_clear
+
+```json
+→ {"cmd": "clipboard_clear"}
+← {"ok": true}
+```
+
+- Removes the selection; the app is notified (`wl_data_device.selection` with
+  no offer). A subsequent `clipboard_get` returns `text: null`.
+
 ### shutdown
 
 ```json
@@ -140,6 +188,8 @@ Unparseable requests also get a `{"ok": false, ...}` response.
 - Requests are read up to the first newline. Do not embed newlines in the JSON.
 - The compositor-side read timeout is 5s; the write timeout is 60s.
 - Connections are handled sequentially, one at a time (single-threaded event
-  loop).
+  loop). The one exception is `clipboard_get` on an app-owned selection: the
+  connection is answered from a timer on the event loop after the app has
+  written the selection, so the response can arrive up to 5s later.
 - There is no protocol version negotiation; check the compositor version with
   `ping`'s `version` field.

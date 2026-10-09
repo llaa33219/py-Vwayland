@@ -102,6 +102,37 @@ $ vwayland type <ID> <text>          # US-layout typing
 
 See the [key name table](api-python.md#key-name-table) in the Python API docs.
 
+## paste — paste text via the clipboard
+
+```console
+$ vwayland paste <ID> <text> [--no-restore] [--restore-delay 0.15]
+```
+
+Pastes `text` into the focused field: back up the clipboard, set it, press
+Ctrl+V, then restore the backup. Works for **any language** (Korean, emoji, ...)
+and is the way to go when the app blocks typing/pasting shortcuts — unlike
+`type`, which always goes through the keyboard.
+
+- `--no-restore`: leave `text` in the clipboard instead of restoring the backup.
+- `--restore-delay`: seconds to wait between Ctrl+V and the restore
+  (default `0.15`, gives the app time to request the paste data).
+
+```console
+$ vwayland paste demo "안녕하세요"
+```
+
+## clipboard-get / clipboard-set / clipboard-clear — clipboard
+
+```console
+$ vwayland clipboard-get <ID>            # print the clipboard text
+$ vwayland clipboard-set <ID> <text>     # replace the clipboard content
+$ vwayland clipboard-clear <ID>          # clear the clipboard
+```
+
+`clipboard-get` prints the raw text followed by a newline, and prints an empty
+line (exit code 0) when the clipboard holds no text. `clipboard-set` accepts any
+Unicode text.
+
 ## set-headless — toggle headless mode
 
 ```console
@@ -126,6 +157,7 @@ $ vwayland spawn --id demo --width 1280 --height 720
 $ vwayland launch demo -- my-gui-app
 $ vwayland click demo 300 200
 $ vwayland type demo "hello"
+$ vwayland paste demo "안녕하세요"
 $ vwayland key demo enter
 $ vwayland screenshot demo -o shot.png
 $ vwayland kill demo

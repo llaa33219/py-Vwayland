@@ -15,9 +15,9 @@ to control GUI programs**.
   Python dependencies.
 - Policy: **1 compositor = 1 app = fullscreen.** Window management features are
   intentionally absent.
-- 10 features: spawn / open program / close program / screen size / headless
-  toggle / screen capture / mouse / keyboard / kill / list. The Python API and
-  the `vwayland` CLI map 1:1.
+- 11 features: spawn / open program / close program / screen size / headless
+  toggle / screen capture / mouse / keyboard / clipboard / kill / list. The
+  Python API and the `vwayland` CLI map 1:1.
 
 ## Repository map
 

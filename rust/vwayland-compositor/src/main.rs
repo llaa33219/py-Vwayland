@@ -3,6 +3,7 @@
 //! Runs in headless (pixman software rendering) or windowed (winit + GL) mode,
 //! controlled over a Unix socket (ipc.sock) with a JSON-line protocol.
 
+mod clipboard;
 mod handlers;
 mod headless;
 mod inject;

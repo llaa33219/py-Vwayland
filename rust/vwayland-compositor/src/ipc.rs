@@ -13,10 +13,14 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use smithay::reexports::calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction};
+use smithay::reexports::calloop::{
+    generic::Generic,
+    timer::Timer,
+    EventLoop, Interest, Mode, PostAction,
+};
 use tracing::{info, warn};
 
-use crate::{Backend, CalloopData, VERSION};
+use crate::{clipboard, Backend, CalloopData, VERSION};
 
 pub fn init(event_loop: &mut EventLoop<CalloopData>, sock_path: &Path) -> std::io::Result<()> {
     if sock_path.exists() {
@@ -45,6 +49,18 @@ pub fn init(event_loop: &mut EventLoop<CalloopData>, sock_path: &Path) -> std::i
         },
     )
     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("insert ipc source: {e:?}")))?;
+
+    // Drives in-flight clipboard_get requests: it must not block the loop, or
+    // the app could never answer the wl_data_offer.receive we just sent.
+    event_loop
+        .handle()
+        .insert_source(Timer::from_duration(Duration::from_millis(500)), |_, _, data| {
+            clipboard::poll(data)
+        })
+        .map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::Other, format!("insert clipboard timer: {e:?}"))
+        })?;
+
     info!(path = %sock_path.display(), "ipc listening");
     Ok(())
 }
@@ -81,6 +97,11 @@ enum Request {
         code: u32,
         pressed: bool,
     },
+    ClipboardSet {
+        text: String,
+    },
+    ClipboardGet,
+    ClipboardClear,
     Shutdown,
 }
 
@@ -97,37 +118,52 @@ fn handle_conn(stream: UnixStream, data: &mut CalloopData) -> Result<(), String>
     let mut line = String::new();
     reader.read_line(&mut line).map_err(|e| format!("read: {e}"))?;
 
-    let (resp, payload): (Value, Option<Vec<u8>>) = match serde_json::from_str::<Request>(line.trim()) {
-        Ok(req) => dispatch(req, data),
-        Err(e) => (json!({"ok": false, "error": format!("invalid request: {e}")}), None),
-    };
+    // A deferred answer (clipboard_get on an app-owned selection) is written to
+    // this duplicate of the connection later, from the event loop.
+    let reply_stream = stream.try_clone().map_err(|e| e.to_string())?;
+
+    let (resp, payload, deferred): (Value, Option<Vec<u8>>, bool) =
+        match serde_json::from_str::<Request>(line.trim()) {
+            Ok(req) => dispatch(req, data, reply_stream),
+            Err(e) => (
+                json!({"ok": false, "error": format!("invalid request: {e}")}),
+                None,
+                false,
+            ),
+        };
 
     let mut out = stream;
-    let mut header = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
-    header.push('\n');
-    out.write_all(header.as_bytes()).map_err(|e| format!("write: {e}"))?;
-    if let Some(bytes) = payload {
-        out.write_all(&bytes).map_err(|e| format!("write payload: {e}"))?;
+    if !deferred {
+        let mut header = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
+        header.push('\n');
+        out.write_all(header.as_bytes()).map_err(|e| format!("write: {e}"))?;
+        if let Some(bytes) = payload {
+            out.write_all(&bytes).map_err(|e| format!("write payload: {e}"))?;
+        }
+        out.flush().map_err(|e| e.to_string())?;
     }
-    out.flush().map_err(|e| e.to_string())?;
 
     let _ = data.display_handle.flush_clients();
     Ok(())
 }
 
-fn ok(extra: Value) -> (Value, Option<Vec<u8>>) {
+fn ok(extra: Value) -> (Value, Option<Vec<u8>>, bool) {
     let mut obj = extra;
     if let Value::Object(ref mut map) = obj {
         map.insert("ok".to_string(), Value::Bool(true));
     }
-    (obj, None)
+    (obj, None, false)
 }
 
-fn err(msg: impl Into<String>) -> (Value, Option<Vec<u8>>) {
-    (json!({"ok": false, "error": msg.into()}), None)
+fn err(msg: impl Into<String>) -> (Value, Option<Vec<u8>>, bool) {
+    (json!({"ok": false, "error": msg.into()}), None, false)
 }
 
-fn dispatch(req: Request, data: &mut CalloopData) -> (Value, Option<Vec<u8>>) {
+/// Handle one request.
+///
+/// The third tuple item is `true` when the response is deferred: the command
+/// parked `reply_stream` and will answer it from the event loop later.
+fn dispatch(req: Request, data: &mut CalloopData, reply_stream: UnixStream) -> (Value, Option<Vec<u8>>, bool) {
     let state = &mut data.state;
     match req {
         Request::Ping => {
@@ -179,6 +215,7 @@ fn dispatch(req: Request, data: &mut CalloopData) -> (Value, Option<Vec<u8>>) {
                 Ok((w, h, png)) => (
                     json!({"ok": true, "width": w, "height": h, "format": "png", "bytes": png.len()}),
                     Some(png),
+                    false,
                 ),
                 Err(e) => err(e),
             }
@@ -197,6 +234,18 @@ fn dispatch(req: Request, data: &mut CalloopData) -> (Value, Option<Vec<u8>>) {
         }
         Request::Key { code, pressed } => {
             state.inject_key(code, pressed);
+            ok(json!({}))
+        }
+        Request::ClipboardSet { text } => {
+            clipboard::set(&data.display_handle, state, &text);
+            ok(json!({}))
+        }
+        Request::ClipboardGet => match clipboard::get(state, reply_stream) {
+            Some(resp) => (resp, None, false),
+            None => (Value::Null, None, true),
+        },
+        Request::ClipboardClear => {
+            clipboard::clear(&data.display_handle, state);
             ok(json!({}))
         }
         Request::Shutdown => {
