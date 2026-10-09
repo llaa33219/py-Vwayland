@@ -125,6 +125,33 @@ Unparseable requests also get a `{"ok": false, ...}` response.
   The compositor converts it to the xkb convention (+8) internally, so clients
   receive the evdev code unchanged.
 
+### type_text
+
+```json
+→ {"cmd": "type_text", "text": "안녕하세요", "interval_ms": 20}
+← {"ok": true, "method": "keys"}
+```
+
+- `text`: UTF-8 text, typed verbatim (byte-exact, any Unicode).
+- `interval_ms` (optional, default `0`): delay between two characters on the
+  key-events path. **Ignored on the IME path**, where the text is a single
+  atomic `commit_string`.
+- `method` tells which layer typed the text:
+  - `"ime"` — the focused app had `zwp_text_input_v3` enabled, so the text was
+    inserted with `commit_string` + `done` (what a real input method does).
+  - `"keys"` — the text was typed as real key events through a temporary xkb
+    keymap (the server-side `wtype` technique). This works for every language
+    and every app, including fields that refuse a paste.
+- An empty `text` is a no-op that still returns `{"ok": true, "method": ...}`.
+- With `interval_ms > 0` the compositor sleeps between characters on the event
+  loop (synchronously). The total sleeping time of one call is capped at 10s;
+  beyond that the per-character delay is reduced.
+- Errors: `{"ok": false, "error": "no focused surface"}` when nothing has
+  keyboard focus, `"no keyboard in this compositor"` in the impossible case of
+  a seat without keyboard.
+- The clipboard commands are unaffected: `type_text` never touches the
+  selection. Use `clipboard_set` + the app's own paste for the clipboard route.
+
 ### clipboard_set
 
 ```json
@@ -139,7 +166,8 @@ Unparseable requests also get a `{"ok": false, ...}` response.
 - Replaces any previous selection. A selection owned by the app is cancelled
   (`wl_data_source.cancelled`).
 - This is the way to feed text that has no keyboard mapping (Korean, emoji,
-  CJK, ...) **through the clipboard**: the app pastes it.
+  CJK, ...) **through the clipboard**: the app pastes it. For typing it instead,
+  use `type_text`, which works in fields that block pasting.
 
 ### clipboard_get
 
@@ -191,5 +219,7 @@ Unparseable requests also get a `{"ok": false, ...}` response.
   loop). The one exception is `clipboard_get` on an app-owned selection: the
   connection is answered from a timer on the event loop after the app has
   written the selection, so the response can arrive up to 5s later.
+- `type_text` on the key-events path also blocks the loop for the duration of
+  the requested inter-character delay (bounded by the 10s cap of the command).
 - There is no protocol version negotiation; check the compositor version with
   `ping`'s `version` field.

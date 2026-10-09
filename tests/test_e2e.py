@@ -260,6 +260,75 @@ class VwaylandE2E(unittest.TestCase):
             text = log.read_text()
             self.assertGreater(text.rfind(restored_line), text.find(pasted_line))
 
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_type_text_ime_path(self) -> None:
+        """Layer C: a string the US layout cannot type goes through the typing
+        engine, which commits it via zwp_text_input_v3 commit_string."""
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.click(100, 100)  # ensure the surface holds keyboard focus
+            comp.type_text("안녕하세요")
+
+            text = wait_for_log(log, "VWTEST text-input 안녕하세요")
+            self.assertIn("VWTEST text-input 안녕하세요", text)
+
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_type_text_keys_fallback_path(self) -> None:
+        """Layer B: with no text input enabled, the engine types real key events
+        through a temporary keymap — one press per character, in order."""
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000", "--no-text-input"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.click(100, 100)
+            comp.type_text("안녕하세요")
+
+            expected = ["안", "녕", "하", "세", "요"]
+            for char in expected:
+                self.assertIn(f"VWTEST typed {char}", wait_for_log(log, f"VWTEST typed {char}"))
+
+            text = log.read_text()
+            positions = [text.find(f"VWTEST typed {char}") for char in expected]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn("VWTEST text-input", text)
+
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_type_text_ascii_unchanged(self) -> None:
+        """A purely US-typeable string keeps the old per-key path: individual key
+        events, no routing through the IPC typing engine."""
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.click(100, 100)
+            comp.type_text("hi")
+
+            text = wait_for_log(log, "VWTEST typed i")
+            self.assertIn("key 35 ", text)  # KEY_H (evdev code, plain key path)
+            self.assertIn("VWTEST typed h", text)
+            self.assertIn("VWTEST typed i", text)
+            self.assertNotIn("VWTEST text-input", text)
+
+    @unittest.skipIf(TEST_CLIENT is None, "vwayland-test-client binary not found")
+    def test_type_text_mixed_goes_engine(self) -> None:
+        """Routing is per string, not per character: one non-ASCII char routes the
+        whole string to the engine, which commits it atomically."""
+        with self.vw.spawn(width=400, height=300, headless=True) as comp:
+            comp.launch([str(TEST_CLIENT), "ff0000"])
+            log = comp.runtime_dir / "app.log"
+            self.assertIn("VWTEST ready", wait_for_log(log, "VWTEST ready"))
+
+            comp.click(100, 100)
+            comp.type_text("hi 안")
+
+            text = wait_for_log(log, "VWTEST text-input hi 안")
+            self.assertIn("VWTEST text-input hi 안", text)
+
     def test_paste_text_no_restore(self) -> None:
         with self.vw.spawn(width=320, height=240, headless=True) as comp:
             comp.clipboard_set("기존")

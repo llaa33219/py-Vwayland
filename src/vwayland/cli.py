@@ -85,7 +85,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cb.add_argument("id")
     cb.add_argument("keys", nargs="+")
 
-    tp = sub.add_parser("type", help="type a string")
+    tp = sub.add_parser("type", help="type a string (any language, e.g. Korean)")
     tp.add_argument("id")
     tp.add_argument("text")
 

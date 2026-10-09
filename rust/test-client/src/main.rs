@@ -4,20 +4,27 @@
 //! - Prints "VWTEST ..." lines to stdout for received pointer/keyboard events.
 //! - Prints "VWTEST ready <w>x<h>" after the first draw.
 //! - Prints "VWTEST clipboard <text>" / "VWTEST clipboard-cleared" for selections.
+//! - Prints "VWTEST text-input <text>" for text committed by an input method,
+//!   and "VWTEST typed <char>" for characters resolved from the xkb keymap.
 //!
-//! Usage: vwayland-test-client [RRGGBB]
+//! Usage: vwayland-test-client [RRGGBB] [--no-text-input]
 
 mod clipboard;
+mod draw;
+mod keyboard_text;
+mod text_input;
 
-use std::ffi::CString;
-use std::os::unix::io::BorrowedFd;
+/// Argument that suppresses the text input, so `type_text` takes the key
+/// event path instead.
+const NO_TEXT_INPUT: &str = "--no-text-input";
 
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_data_device_manager, wl_keyboard, wl_pointer, wl_registry, wl_seat,
-    wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_data_device_manager, wl_pointer, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle};
+use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3;
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 struct AppState {
@@ -29,63 +36,8 @@ struct AppState {
     color: u32,
     drawn: bool,
     clipboard: clipboard::Clipboard,
-}
-
-impl AppState {
-    fn draw(&self, qh: &QueueHandle<Self>) {
-        if self.width == 0 || self.height == 0 {
-            return;
-        }
-        let size = (self.width * self.height * 4) as usize;
-
-        let name = CString::new("vwayland-test-client").unwrap();
-        let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
-        assert!(fd >= 0, "memfd_create failed");
-        assert_eq!(unsafe { libc::ftruncate(fd, size as libc::off_t) }, 0);
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                fd,
-                0,
-            )
-        };
-        assert_ne!(ptr, libc::MAP_FAILED, "mmap failed");
-
-        // XRGB8888 = 0x00RRGGBB
-        let pixel: u32 = self.color & 0x00ff_ffff;
-        let pixels = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u32, size / 4) };
-        pixels.fill(pixel);
-
-        let pool = self.shm.create_pool(unsafe { BorrowedFd::borrow_raw(fd) }, size as i32, qh, ());
-        let buffer = pool.create_buffer(
-            0,
-            self.width as i32,
-            self.height as i32,
-            (self.width * 4) as i32,
-            wl_shm::Format::Xrgb8888,
-            qh,
-            (),
-        );
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface.damage(0, 0, self.width as i32, self.height as i32);
-        self.surface.commit();
-
-        buffer.destroy();
-        pool.destroy();
-        unsafe {
-            libc::munmap(ptr, size);
-            libc::close(fd);
-        }
-
-        if !self.drawn {
-            println!("VWTEST ready {}x{}", self.width, self.height);
-            use std::io::Write;
-            let _ = std::io::stdout().flush();
-        }
-    }
+    keyboard_text: keyboard_text::KeyboardText,
+    text_input: text_input::TextInput,
 }
 
 fn log_line(line: String) {
@@ -192,10 +144,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for AppState {
         _qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+            wl_pointer::Event::Enter {
+                surface_x,
+                surface_y,
+                ..
+            } => {
                 log_line(format!("pointer_enter {surface_x:.1} {surface_y:.1}"));
             }
-            wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => {
                 log_line(format!("pointer_motion {surface_x:.1} {surface_y:.1}"));
             }
             wl_pointer::Event::Button { button, state, .. } => {
@@ -205,29 +165,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for AppState {
                 log_line(format!("pointer_axis {axis:?} {value:.2}"));
             }
             wl_pointer::Event::Leave { .. } => log_line("pointer_leave".to_string()),
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch<wl_keyboard::WlKeyboard, ()> for AppState {
-    fn event(
-        _state: &mut Self,
-        _proxy: &wl_keyboard::WlKeyboard,
-        event: wl_keyboard::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_keyboard::Event::Enter { .. } => log_line("keyboard_enter".to_string()),
-            wl_keyboard::Event::Key { key, state, .. } => {
-                log_line(format!("key {key} {state:?}"));
-            }
-            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
-                log_line(format!("modifiers {mods_depressed}"));
-            }
-            wl_keyboard::Event::Leave { .. } => log_line("keyboard_leave".to_string()),
             _ => {}
         }
     }
@@ -246,16 +183,21 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for AppState {
 }
 
 fn main() {
-    let color = std::env::args()
-        .nth(1)
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let color = args
+        .first()
         .and_then(|s| u32::from_str_radix(s.trim_start_matches('#'), 16).ok())
         .unwrap_or(0xff0000);
+    // Without a text input the compositor falls back to typing real key events,
+    // which is the only way to observe that path.
+    let wants_text_input = !args.iter().any(|arg| arg == NO_TEXT_INPUT);
 
     let conn = Connection::connect_to_env().expect("cannot connect to wayland display");
     let (globals, mut queue) = registry_queue_init::<AppState>(&conn).expect("registry failed");
     let qh = queue.handle();
 
-    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).expect("no compositor");
+    let compositor: wl_compositor::WlCompositor =
+        globals.bind(&qh, 1..=4, ()).expect("no compositor");
     let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).expect("no shm");
     let xdg: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=6, ()).expect("no xdg_wm_base");
     let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=7, ()).expect("no seat");
@@ -267,6 +209,14 @@ fn main() {
     let _data_device = data_device_manager.get_data_device(&seat, &qh, ());
 
     let surface = compositor.create_surface(&qh, ());
+    if wants_text_input {
+        let text_input_manager: zwp_text_input_manager_v3::ZwpTextInputManagerV3 = globals
+            .bind(&qh, 1..=1, ())
+            .expect("no text input manager");
+        // Created before the surface is mapped so the compositor can send
+        // `enter` as soon as the keyboard focus lands on it.
+        text_input_manager.get_text_input(&seat, &qh, ());
+    }
     let xdg_surface = xdg.get_xdg_surface(&surface, &qh, ());
     let toplevel = xdg_surface.get_toplevel(&qh, ());
     toplevel.set_title("vwayland-test-client".to_string());
@@ -280,13 +230,17 @@ fn main() {
         color,
         drawn: false,
         clipboard: clipboard::Clipboard::new(),
+        keyboard_text: keyboard_text::KeyboardText::new(),
+        text_input: text_input::TextInput::new(),
     };
 
     // Roundtrip once to receive the seat capabilities event
     queue.roundtrip(&mut state).expect("roundtrip failed");
 
     loop {
-        queue.blocking_dispatch(&mut state).expect("dispatch failed");
+        queue
+            .blocking_dispatch(&mut state)
+            .expect("dispatch failed");
         // The compositor only writes into the pipe after receiving these
         // requests, so they can be queued from the handler but never flushed there.
         state.clipboard.flush_pending(&queue);

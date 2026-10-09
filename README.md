@@ -54,7 +54,7 @@ architectures): see [docs/installation.md](docs/installation.md).
 - Switch between headless and windowed mode (`set_headless`)
 - Capture the screen (`screenshot` → PNG)
 - Mouse move/click/drag/scroll (`move_to`, `click`, `drag`, `scroll`)
-- Keyboard input (`key`, `combo`, `type_text`)
+- Keyboard input (`key`, `combo`, `type_text` — any language/Unicode typing)
 - Clipboard and Unicode text paste (`clipboard_get`/`clipboard_set`/`clipboard_clear`, `paste_text`)
 
 ## Documentation

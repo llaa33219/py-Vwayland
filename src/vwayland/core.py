@@ -106,6 +106,26 @@ def _validate_id(comp_id: str) -> str:
     return comp_id
 
 
+def _is_us_typeable(ch: str) -> bool:
+    """Can this character be typed by type_text()'s US-layout key loop?
+
+    Mirrors the per-character branches of the key loop exactly: `\\n`, `\\t`,
+    uppercase letters (shift + lowercase), SHIFT_CHARS symbols (shift + base)
+    and plain characters that resolve to a key name.
+    """
+    if ch == "\n" or ch == "\t":
+        return True
+    if ch.isupper():
+        ch = ch.lower()
+    elif ch in SHIFT_CHARS:
+        ch = SHIFT_CHARS[ch]
+    try:
+        resolve_key(ch)
+    except VwaylandError:
+        return False
+    return True
+
+
 def _wait_pid_exit(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -371,7 +391,31 @@ class Compositor:
             self.key_up(k)
 
     def type_text(self, text: str, interval: float = 0.0) -> None:
-        """Type a string using the US layout."""
+        """Type a string. Any language is supported (Korean, emoji, ...).
+
+        Two tiers, chosen per string:
+
+        - Every character is typeable on the US layout (letters, digits,
+          symbols, space, `\\n`, `\\t`): the text is typed with direct key
+          events, one key sequence per character, exactly as before. This is
+          the only case where `interval` is honored as a sleep between
+          characters.
+        - Otherwise (any character outside the US layout): the compositor's
+          typing engine handles the whole string. It commits the text through
+          `zwp_text_input_v3` when the focused field supports it (a real IME
+          commit), and otherwise types real key events through a temporary
+          keymap. `interval` is passed on as a per-character delay
+          (`interval_ms`) and only takes effect on that key-event fallback; the
+          IME commit is atomic.
+
+        This differs from `paste_text()`, which routes the text through the
+        clipboard instead of the keyboard.
+        """
+        if not all(_is_us_typeable(ch) for ch in text):
+            self._rpc(
+                {"cmd": "type_text", "text": text, "interval_ms": int(interval * 1000)}
+            )
+            return
         shift = resolve_key("shift")
         for ch in text:
             if ch == "\n":
@@ -425,9 +469,9 @@ class Compositor:
         `restore_delay` seconds for the app to request the paste data, then
         put the previous clipboard content back.
 
-        Unlike type_text(), which types the text with the keyboard, this works
-        even when the app blocks pasting: the text travels through the
-        clipboard instead.
+        Unlike type_text(), which types the text with the keyboard (IME commit
+        or key events), this works even when the app blocks pasting: the text
+        travels through the clipboard instead.
 
         - `restore=True` (default): the backed-up content is put back
           (content-identical restore; the clipboard is cleared again if it was

@@ -7,5 +7,6 @@ description = "Minimal wayland client used by py-Vwayland integration tests (not
 
 [dependencies]
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+xkbcommon = "0.8"
 libc = "0.2"

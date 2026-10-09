@@ -12,6 +12,8 @@ Sources live in `rust/vwayland-compositor/`.
 | `src/state.rs` | Compositor state (space, output, seat, smithay globals), app process launch/close/reap, private D-Bus session bus |
 | `src/handlers.rs` | smithay protocol handlers (compositor, xdg_shell, seat, shm, output, data_device) |
 | `src/clipboard.rs` | Clipboard selection: set/get/clear over IPC, including the pending-read state machine |
+| `src/typing.rs` | Unicode text typing (`type_text`): IME layer dispatch + temporary-keymap key typing |
+| `src/text_input.rs` | `zwp_text_input_manager_v3` global, enter/leave focus tracking, `commit_string` commit |
 | `src/inject.rs` | IPC input injection (synthesized pointer/keyboard events) + host input handling in windowed mode |
 | `src/headless.rs` | Headless backend: pixman software rendering, CPU-buffer screenshots |
 | `src/windowed.rs` | Windowed backend: winit + GLES2, offscreen-texture screenshots |
@@ -72,6 +74,7 @@ Sources live in `rust/vwayland-compositor/`.
 - `xdg_wm_base` (toplevel/popup), `xdg_output`
 - `wl_seat` (pointer, keyboard), `wl_data_device` (clipboard selection:
   compositor-side set/get/clear via IPC)
+- `zwp_text_input_manager_v3` (IME insertion path of `type_text`)
 - `wl_output`
 
 ## Clipboard
@@ -102,6 +105,47 @@ through the IPC commands `clipboard_set` / `clipboard_get` / `clipboard_clear`
 - The primary selection (middle-click) is not implemented, and nothing is
   shared with the host clipboard.
 
+## Text typing (`type_text`)
+
+`type_text` (see [protocol.md](protocol.md)) types arbitrary Unicode into the
+focused app. Two layers, tried in this order; the answer reports which one ran
+in the `method` field (`"ime"` / `"keys"`).
+
+- **Layer C — IME (`src/text_input.rs`).** The compositor itself acts as the
+  input method: when the focused app has a `zwp_text_input_v3` object in the
+  enabled state, the text is inserted with the `commit_string` event followed by
+  `done`, exactly what a real IME sends. Smithay's own `wayland::text_input`
+  module is *not* used: it is written around an external IME client
+  (`zwp_input_method_v1`) and drops every `enable`/`commit` while no such client
+  is connected, which is never the case here. So the text-input objects are
+  tracked locally: `enter`/`leave` follow the keyboard focus (from
+  `SeatHandler::focus_changed`), `enable`/`disable` stay double-buffered until
+  `commit`, and the `done` serial is the number of `commit` requests received on
+  that object, as the protocol mandates. The client's state requests
+  (surrounding text, content type, cursor rectangle) are accepted and ignored.
+- **Layer B — keymap typing (`src/typing.rs`), the universal fallback.** The
+  text is typed as *real key events*: a synthetic xkb keymap is generated in
+  which one scratch keycode (from 9) carries the keysym of each character,
+  installed with `KeyboardHandle::set_keymap_from_string`, then each character is
+  injected as a press/release pair of its scratch keycode. `wl_keyboard.key`
+  only carries keycodes, so the client resolves them through the keymap that was
+  just sent — this is the technique of `wtype`, moved server-side. Keysyms come
+  from `xkeysym` (`Keysym::from_char`, plus `Return`/`Tab`/`Escape`/`BackSpace`/
+  `Delete` for the control characters) and are written in keymap syntax: the
+  table name without its `XK_` prefix, or `UXXXX` for Unicode keysyms.
+- **Keymap swapping.** The whole text is typed in chunks of 32 characters, one
+  keymap per chunk (repeated characters within a chunk share a key). The
+  keymap installed at startup (`XkbConfig::default()`, i.e. the environment /
+  "English (US)" default) is restored at the end, including on the error path,
+  so no side effect outlives the command. Synthetic keys need no modifiers, and
+  every key is released again, so no modifier is left stuck.
+- **Timing.** `interval_ms` sleeps between characters on the event loop
+  (synchronous, so the compositor is busy while typing); the total sleeping time
+  of one call is capped at 10s. The IME layer ignores `interval_ms` (one atomic
+  commit).
+- Typing never touches the clipboard selection; `clipboard_*` stays specialized
+  for copy/paste.
+
 ## Limitations
 
 | Item | Status |
@@ -114,6 +158,7 @@ through the IPC commands `clipboard_set` / `clipboard_get` / `clipboard_clear`
 | Clipboard | Clipboard selection is supported inside the compositor (IPC `clipboard_set` / `clipboard_get` / `clipboard_clear`). Nothing is exchanged with the *outside* — there is no host clipboard sync. Text/plain only |
 | Primary selection | **Not supported** (middle-click selection) |
 | DnD | Not implemented. `wl_data_device` is bound, but drag and drop is never started |
+| IME protocol | `zwp_input_method_v1` is not implemented: the compositor is the input method itself (`type_text`), no external IME client can attach |
 | Frame rate | Fixed 60Hz timer in headless mode |
 
 This list evolves with the implementation. If it diverges from the code, fix
@@ -146,12 +191,20 @@ $ python3 -c "import socket,json; s=socket.socket(socket.AF_UNIX); s.connect('/t
 `rust/test-client/` is a minimal Wayland client used only by the integration
 tests (not shipped).
 
-- Draws a solid-color fullscreen shm buffer (`vwayland-test-client [RRGGBB]`,
-  default red).
+- Draws a solid-color fullscreen shm buffer (`vwayland-test-client [RRGGBB]
+  [--no-text-input]`, default red).
 - Prints `VWTEST ...` lines to stdout for received pointer/keyboard events.
 - Prints `VWTEST ready <w>x<h>` after the first draw.
 - Prints `VWTEST clipboard <text>`, `VWTEST clipboard-cleared`,
   `VWTEST clipboard-timeout`, `VWTEST clipboard-failed` for selections.
+- Binds `zwp_text_input_v3`, enables itself on `enter`, and prints
+  `VWTEST text-input <text>` for text an input method commits — this is the
+  path `type_text` takes when the focused app supports IME.
+- Resolves every key press through the xkb keymap that is current at event
+  time (re-read on every `wl_keyboard.keymap` event) and prints
+  `VWTEST typed <char>` for each printable character. With `--no-text-input`
+  the client has no text input, so `type_text` falls back to the key event
+  path and one line per character is printed.
 
 `tests/test_e2e.py` uses this client to verify rendering (screenshot color),
-input delivery, and clipboard transfer.
+input delivery, clipboard transfer, and both typing paths.

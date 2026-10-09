@@ -215,6 +215,7 @@ impl SeatHandler for Vwayland {
         let dh = &self.display_handle;
         let client = focused.and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client);
+        self.text_input_state.focus_changed(focused);
     }
 }
 

@@ -86,6 +86,25 @@ impl Vwayland {
         );
     }
 
+    /// Inject a key event using an **xkb** keycode (no evdev +8 conversion).
+    ///
+    /// Used by the typing engine, which owns both sides of the temporary
+    /// keymap it installs, so the scratch keycodes it produces are already in
+    /// the convention `input()` expects.
+    pub fn inject_xkb_key(&mut self, keycode: u32, pressed: bool) {
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = self.now_msec();
+        let state = if pressed { KeyState::Pressed } else { KeyState::Released };
+        self.seat.get_keyboard().unwrap().input::<(), _>(
+            self,
+            keycode.into(),
+            state,
+            serial,
+            time,
+            |_, _, _| FilterResult::Forward,
+        );
+    }
+
     /// Give keyboard focus to the window under the pointer on click
     fn focus_window_under_pointer(&mut self, serial: smithay::utils::Serial) {
         let pointer = self.seat.get_pointer().unwrap();

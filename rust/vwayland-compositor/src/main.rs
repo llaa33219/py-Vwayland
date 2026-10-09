@@ -9,6 +9,8 @@ mod headless;
 mod inject;
 mod ipc;
 mod state;
+mod text_input;
+mod typing;
 mod windowed;
 
 use std::path::PathBuf;

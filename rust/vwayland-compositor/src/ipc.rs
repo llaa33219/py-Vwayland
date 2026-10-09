@@ -20,7 +20,7 @@ use smithay::reexports::calloop::{
 };
 use tracing::{info, warn};
 
-use crate::{clipboard, Backend, CalloopData, VERSION};
+use crate::{clipboard, typing, Backend, CalloopData, VERSION};
 
 pub fn init(event_loop: &mut EventLoop<CalloopData>, sock_path: &Path) -> std::io::Result<()> {
     if sock_path.exists() {
@@ -102,6 +102,11 @@ enum Request {
     },
     ClipboardGet,
     ClipboardClear,
+    TypeText {
+        text: String,
+        #[serde(default)]
+        interval_ms: u64,
+    },
     Shutdown,
 }
 
@@ -248,6 +253,10 @@ fn dispatch(req: Request, data: &mut CalloopData, reply_stream: UnixStream) -> (
             clipboard::clear(&data.display_handle, state);
             ok(json!({}))
         }
+        Request::TypeText { text, interval_ms } => match typing::type_text(state, &text, interval_ms) {
+            Ok(method) => ok(json!({"method": method})),
+            Err(e) => err(e),
+        },
         Request::Shutdown => {
             info!("shutdown requested via ipc");
             state.loop_signal.stop();

@@ -97,8 +97,14 @@ detents, and `dy > 0` scrolls up.
 ```console
 $ vwayland key <ID> <key-name>       # e.g.: enter, a, f5, tab
 $ vwayland combo <ID> <keys...>      # e.g.: vwayland combo demo ctrl c
-$ vwayland type <ID> <text>          # US-layout typing
+$ vwayland type <ID> <text>          # typing, any language (US-layout key events, or IME)
 ```
+
+`type` accepts **any language**. US-layout text is typed with key events, one key
+sequence per character; text outside the US layout (Korean, emoji, ...) is typed
+by the compositor's typing engine, which commits through `zwp_text_input_v3`
+when the focused field supports it and otherwise falls back to real key events
+via a temporary keymap.
 
 See the [key name table](api-python.md#key-name-table) in the Python API docs.
 

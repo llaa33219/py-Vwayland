@@ -25,6 +25,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use tracing::{info, warn};
 
+use crate::text_input::TextInputState;
 use crate::CalloopData;
 
 pub struct AppProc {
@@ -104,6 +105,7 @@ pub struct Vwayland {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Vwayland>,
     pub data_device_state: DataDeviceState,
+    pub text_input_state: TextInputState,
 
     pub seat: Seat<Self>,
 }
@@ -127,6 +129,7 @@ impl Vwayland {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let mut seat_state = SeatState::new();
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let text_input_state = TextInputState::new(&dh);
         let popups = PopupManager::default();
 
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "vwayland");
@@ -183,6 +186,7 @@ impl Vwayland {
             output_manager_state,
             seat_state,
             data_device_state,
+            text_input_state,
             seat,
         }
     }

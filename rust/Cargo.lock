@@ -1714,6 +1714,7 @@ dependencies = [
  "libc",
  "wayland-client",
  "wayland-protocols",
+ "xkbcommon",
 ]
 
 [[package]]

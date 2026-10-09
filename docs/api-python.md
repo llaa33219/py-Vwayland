@@ -148,9 +148,22 @@ Buttons are given by name (`"left"`, `"right"`, `"middle"`, `"side"`, `"extra"`,
 | `comp.key(name)` | Press and release a key |
 | `comp.key_down(name)` / `comp.key_up(name)` | Press / release a key |
 | `comp.combo(*names)` | Key combo. `combo("ctrl", "c")` → c while holding ctrl |
-| `comp.type_text(text, interval=0.0)` | Type a string (US layout; shift is applied automatically for uppercase/symbols). `\n` = enter, `\t` = tab |
+| `comp.type_text(text, interval=0.0)` | Type a string, any language. US-layout characters are typed with key events (shift is applied automatically for uppercase/symbols; `\n` = enter, `\t` = tab); other text is typed by the compositor's typing engine. See below |
 
 Keys are given by name (table below) or evdev key code as int.
+
+`type_text()` supports **any language** (Korean, emoji, accented text, ...) and
+picks one of two tiers per string:
+
+| Tier | When | How | `interval` |
+|---|---|---|---|
+| US-layout key events | Every character is typeable on the US layout (letters, digits, symbols, space, `\n`, `\t`) | Direct key events, one key sequence per character, sent from Python | Sleep between characters |
+| Compositor typing engine | Any character is outside the US layout (e.g. Korean) | The compositor types the whole string: it commits the text through `zwp_text_input_v3` when the focused field supports it (a real IME commit), otherwise it types real key events via a temporary keymap — which also works in fields that block pasting | Passed on as a per-character delay, applied on the key-event fallback only; an IME commit is atomic |
+
+```python
+comp.type_text("Hello, World!")    # US-layout key events, one per character
+comp.type_text("안녕하세요")         # Korean → compositor typing engine
+```
 
 #### Key name table
 
@@ -198,8 +211,9 @@ put the previous clipboard content back.
 The restore is content-identical: the backed-up text is set again. Use
 `restore=False` when the app keeps reading the clipboard afterwards.
 
-Unlike `type_text()`, which types the text with the keyboard, `paste_text()`
-sends it through the clipboard, so it also works in fields that block pasting.
+Unlike `type_text()`, which types the text with the keyboard (IME commit or key
+events), `paste_text()` sends it through the clipboard, so it also works in
+fields that block pasting.
 
 #### Clipboard primitives
 
@@ -211,7 +225,7 @@ sends it through the clipboard, so it also works in fields that block pasting.
 
 ```python
 comp.click(512, 100)                 # focus a text field
-comp.type_text("안녕하세요")         # Korean, if the keyboard layout has it
+comp.type_text("안녕하세요")         # Korean via the compositor typing engine
 comp.paste_text("안녕하세요")         # Korean via clipboard paste
 comp.clipboard_set("plain text")     # keep it in the clipboard
 print(comp.clipboard_get())          # "plain text"
@@ -268,6 +282,7 @@ with vwayland.spawn(width=1024, height=768, headless=True) as comp:
 
     comp.click(512, 100)               # click a button near the top
     comp.type_text("search terms here")
+    comp.type_text("안녕하세요")        # any language, incl. Korean
     comp.paste_text("안녕하세요")        # any language, incl. Korean (clipboard)
     comp.key("enter")
     comp.scroll(dy=-5)                 # 5 detents down
