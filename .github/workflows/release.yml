@@ -45,6 +45,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           rustup target add aarch64-unknown-linux-gnu riscv64gc-unknown-linux-gnu \
             x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 
@@ -84,7 +85,7 @@ jobs:
             case "$t" in
               *musl) gcc_pre="${t%%-unknown-linux-musl}-linux-musl"; sys="$SR/${t%%-*}-musl/lib" ;;
               aarch64-*) gcc_pre="aarch64-linux"; sys="$SR/aarch64-gnu/lib" ;;
-              riscv64gc-*) gcc_pre="riscv64-linux"; sys="$SR/riscv64-gnu/lib" ;;
+              riscv64gc-*) gcc_pre="riscv64-linux"; sys="$SR/riscv64gc-gnu/lib" ;;
             esac
             tc_dir=$(ls -d $TC/*/ | while read d; do [ -x "$d/bin/$gcc_pre-gcc" ] && echo "$d"; done | head -1)
             export CC_${env_name}="$tc_dir/bin/$gcc_pre-gcc"
