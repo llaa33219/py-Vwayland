@@ -40,15 +40,17 @@ XKBCOMMON_URL = (
 # Rust triple -> (toolchain url, toolchain dir name, gcc prefix, libc kind)
 TOOLCHAINS = {
     "x86_64-unknown-linux-musl": (
-        "https://musl.cc/x86_64-linux-musl-cross.tgz",
-        "x86_64-linux-musl-cross",
-        "x86_64-linux-musl",
+        "https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/"
+        "tarballs/x86-64--musl--stable-2024.02-1.tar.bz2",
+        "x86-64--musl--stable-2024.02-1",
+        "x86_64-linux",
         "musl",
     ),
     "aarch64-unknown-linux-musl": (
-        "https://musl.cc/aarch64-linux-musl-cross.tgz",
-        "aarch64-linux-musl-cross",
-        "aarch64-linux-musl",
+        "https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/"
+        "tarballs/aarch64--musl--stable-2024.02-1.tar.bz2",
+        "aarch64--musl--stable-2024.02-1",
+        "aarch64-linux",
         "musl",
     ),
     "aarch64-unknown-linux-gnu": (
@@ -149,8 +151,9 @@ def meson_build(src: Path, build: Path, cross: Path, prefix: str, static: bool,
                      f"--default-library={'static' if static else 'shared'}"]
             + extra)
     if (build / "build.ninja").exists():
-        # Reconfigure in place so prefix/options match this invocation.
-        subprocess.run(args + ["--reconfigure"], cwd=src, check=True,
+        # --wipe re-reads the cross file (a plain --reconfigure keeps the old
+        # toolchain paths and fails when the toolchain changed).
+        subprocess.run(args + ["--wipe"], cwd=src, check=True,
                        stdout=subprocess.DEVNULL)
     else:
         subprocess.run(args, cwd=src, check=True, stdout=subprocess.DEVNULL)

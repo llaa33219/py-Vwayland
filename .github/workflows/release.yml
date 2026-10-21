@@ -83,7 +83,7 @@ jobs:
           for t in $CROSS_TARGETS; do
             env_name=$(echo "$t" | tr 'a-z-' 'A-Z_')
             case "$t" in
-              *musl) gcc_pre="${t%%-unknown-linux-musl}-linux-musl"; sys="$SR/${t%%-*}-musl/lib" ;;
+              *musl) gcc_pre="${t%%-unknown-linux-musl}-linux"; sys="$SR/${t%%-*}-musl/lib" ;;
               aarch64-*) gcc_pre="aarch64-linux"; sys="$SR/aarch64-gnu/lib" ;;
               riscv64gc-*) gcc_pre="riscv64-linux"; sys="$SR/riscv64gc-gnu/lib" ;;
             esac
