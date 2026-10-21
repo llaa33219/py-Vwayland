@@ -9,7 +9,9 @@ py-Vwayland is a package that **spawns virtual Wayland compositors from Python
 to control GUI programs**.
 
 - The compositor is written in **Rust (Smithay 0.7)** and shipped as a binary
-  inside the wheel (`src/vwayland/_native/`).
+  inside the wheel (`src/vwayland/_native/<platform-tag>/`). Prebuilt wheels
+  cover x86_64/aarch64/riscv64 on glibc (manylinux_2_28) and x86_64/aarch64 on
+  musl (musllinux_1_2); each wheel only ships its own platform.
 - The Python package (`src/vwayland/`) launches compositor processes and
   controls them over a **JSON-line IPC** on a Unix socket. It has zero runtime
   Python dependencies.
@@ -23,13 +25,15 @@ to control GUI programs**.
 
 | Path | What lives there |
 |---|---|
-| `src/vwayland/core.py` | Most of the public API (spawn/connect/list, Compositor) |
+| `src/vwayland/core.py` | Most of the public API (spawn/connect/list, Compositor); `_find_binary` resolves the per-platform bundle |
 | `src/vwayland/client.py` | Low-level IPC client |
 | `src/vwayland/keys.py` | Key/button names → evdev codes |
 | `src/vwayland/cli.py` | `vwayland` CLI |
 | `rust/vwayland-compositor/` | The compositor itself (main/state/handlers/inject/headless/windowed/ipc) |
 | `rust/test-client/` | Minimal Wayland client for E2E tests |
-| `scripts/build_compositor.py` | Compositor build + native bundling (patchelf) |
+| `scripts/build_compositor.py` | Compositor build + native bundling per target |
+| `scripts/prepare_sysroots.py` | Cross toolchains + pixman/xkbcommon sysroots |
+| `scripts/make_wheels.py` | Split the any-wheel into per-platform wheels |
 | `tests/` | unittest-based unit/E2E tests |
 | `docs/` | All technical documentation (see the docs rules below) |
 
@@ -55,8 +59,9 @@ Deeper material lives in `docs/`: motivation (`overview.md`), structure
 # Compositor build (debug)
 cd rust && cargo build
 
-# Compositor release build + bundle into src/vwayland/_native (requires patchelf)
-python3 scripts/build_compositor.py
+# Compositor release build + bundle into src/vwayland/_native/<platform-tag>
+# (native build requires patchelf; cross builds need prepare_sysroots.py first)
+python3 scripts/build_compositor.py [--target <rust-triple>]
 
 # Tests (compositor binary auto-detected: _native → target/release → target/debug)
 python3 -m unittest discover -s tests -v
@@ -77,9 +82,10 @@ PYTHONPATH=src python3 -m vwayland.cli list
   compositor; removing it makes the compositor connect to itself and deadlock.
 - **frame callbacks**: headless mode sends frame callbacks on a 60Hz timer.
   Removing them makes GTK/Qt apps stop drawing after the first frame.
-- **Bundle RPATH**: the `_native/` binary uses the bundled libpixman/libxkbcommon
-  under `$ORIGIN/lib`. Replacing the binary by hand drops the rpath — use
-  `scripts/build_compositor.py --no-build` instead.
+- **Bundle RPATH**: glibc `_native/<tag>/` binaries use bundled
+  libpixman/libxkbcommon under `$ORIGIN/lib`; musl binaries are fully static.
+  Replacing a glibc binary by hand drops the rpath — use
+  `scripts/build_compositor.py --target <triple> --no-build` instead.
 - In Python, `list` is shadowed by the module-level function. If you need the
   builtin `list` in core.py, use `builtins.list`.
 

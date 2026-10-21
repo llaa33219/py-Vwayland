@@ -29,9 +29,10 @@ with vwayland.spawn(width=1280, height=720, headless=True) as comp:
 $ pip install py-vwayland
 ```
 
-The wheel bundles the compositor binary and its native libraries, so headless
-mode works out of the box on any x86_64 Linux with glibc ≥ 2.28 — no display
-server, GPU, or extra packages required. For `screenshot().to_pil()`:
+Per-platform wheels bundle the compositor binary (and, on glibc, its native
+libraries), so headless mode works out of the box — no display server, GPU, or
+extra packages required. Prebuilt wheels cover x86_64 / aarch64 / riscv64 on
+glibc ≥ 2.28 and x86_64 / aarch64 on musl (Alpine). For `screenshot().to_pil()`:
 
 ```console
 $ pip install py-vwayland[pillow]

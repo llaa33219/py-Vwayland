@@ -5,9 +5,9 @@
 | Item | Requirement |
 |---|---|
 | OS | Linux (any environment that can run Wayland clients) |
-| Architecture | x86_64 (other architectures: build from source) |
+| Architecture | x86_64, aarch64, riscv64 — prebuilt wheels; others: build from source |
+| libc | glibc ≥ 2.28 **or** musl ≥ 1.2 — both have prebuilt wheels |
 | Python | 3.9+ |
-| glibc | The bundled binary requires the build machine's glibc or newer (releases should target glibc 2.28) |
 | Display server | **Headless mode: not required** / windowed mode: a Wayland or X11 session + EGL/GLES2 |
 | GPU | **Headless mode: not required** (pixman CPU rendering) / windowed mode: host GL |
 | dbus-daemon | Optional. If present, each compositor runs a private session bus so single-instance apps (Firefox, GApplication apps) open inside the compositor; if absent, apps run without a session bus |
@@ -20,14 +20,22 @@
 $ pip install py-vwayland
 ```
 
-The wheel bundles:
+Wheels are published **per platform** (`py3-none-<platform-tag>`), so pip only
+installs a build that matches your machine — installing on an unsupported
+platform fails at resolve time instead of crashing at runtime.
 
-- `vwayland-compositor` — the virtual compositor binary written in Rust
-- `lib/` — non-standard native dependencies (`libpixman-1.so.0`, `libxkbcommon.so.0`)
-  - The binary's RPATH is set to `$ORIGIN/lib`, so the bundled copies are used even
-    if the system lacks these libraries (or has different versions).
-  - Only the glibc family (`libc`, `libm`, `ld-linux`, `libgcc_s`) comes from the
-    system.
+| Wheel tag | Platform | Bundled native code |
+|---|---|---|
+| `manylinux_2_28_x86_64` | x86_64, glibc ≥ 2.28 | binary + `lib/` (pixman, xkbcommon) |
+| `manylinux_2_28_aarch64` | aarch64, glibc ≥ 2.28 | binary + `lib/` |
+| `manylinux_2_28_riscv64` | riscv64, glibc ≥ 2.28 | binary + `lib/` |
+| `musllinux_1_2_x86_64` | x86_64, musl ≥ 1.2 | statically-linked binary (no `lib/`) |
+| `musllinux_1_2_aarch64` | aarch64, musl ≥ 1.2 | statically-linked binary (no `lib/`) |
+
+For glibc builds the binary's RPATH is `$ORIGIN/lib`, so the bundled
+pixman/xkbcommon are used even if the system lacks them; only the glibc family
+(`libc`, `libm`, `ld-linux`, `libgcc_s`) comes from the system. musl builds are
+fully static and need nothing but the kernel.
 
 For Pillow integration:
 
@@ -78,8 +86,17 @@ $ vwayland spawn --id smoke && vwayland screenshot smoke -o smoke.png && vwaylan
 
 ### musl (Alpine, etc.)
 
-The bundled binary targets glibc. On musl systems, build from source and point
-`VWAYLAND_COMPOSITOR_BIN` at your binary.
+musl is supported via prebuilt `musllinux_1_2_*` wheels (statically linked, no
+system libraries required). If you build from source on musl, the build
+produces a static binary; point `VWAYLAND_COMPOSITOR_BIN` at it or use
+`scripts/build_compositor.py --target <rust-musl-triple>`.
+
+### Other architectures / libc
+
+Build from source and cross-compile. `scripts/prepare_sysroots.py` fetches
+prebuilt cross toolchains and builds the pixman/xkbcommon sysroots, then
+`scripts/build_compositor.py --target <triple>` bundles the result. See
+[development.md](development.md#cross-compilation).
 
 ## Environment variables
 
@@ -95,7 +112,9 @@ The bundled binary targets glibc. On musl systems, build from source and point
 
 1. The `spawn(..., compositor_bin=...)` argument
 2. The `VWAYLAND_COMPOSITOR_BIN` environment variable
-3. The bundled `vwayland/_native/vwayland-compositor`
-4. `vwayland-compositor` on `$PATH`
+3. The bundled `vwayland/_native/<platform-tag>/vwayland-compositor` matching
+   the current platform (e.g. `manylinux_2_28_aarch64`, `musllinux_1_2_x86_64`)
+4. The legacy flat `vwayland/_native/vwayland-compositor`
+5. `vwayland-compositor` on `$PATH`
 
 If all fail, `CompositorStartError` is raised.

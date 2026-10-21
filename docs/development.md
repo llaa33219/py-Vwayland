@@ -56,11 +56,50 @@ $ cd rust && cargo build --release
 $ python3 scripts/build_compositor.py
 ```
 
-- Builds release and copies the binary to `src/vwayland/_native/`
+- Builds release and bundles it under `src/vwayland/_native/<platform-tag>/`
+  (e.g. `manylinux_2_28_x86_64/`)
 - Copies non-standard libraries found via ldd (libpixman, libxkbcommon) into
-  `_native/lib/`
+  `_native/<platform-tag>/lib/` (glibc targets)
 - Sets RPATH to `$ORIGIN/lib` with patchelf
 - Prints the resulting ldd output and verifies execution with `--version`
+
+### Cross-compilation
+
+To build for the other supported platforms (aarch64, riscv64, musl), first
+prepare the cross toolchains and pixman/xkbcommon sysroots (downloaded into
+`.miniouto/`, requires curl + meson + ninja):
+
+```console
+$ python3 scripts/prepare_sysroots.py            # all supported targets
+$ python3 scripts/prepare_sysroots.py aarch64-unknown-linux-musl   # one
+```
+
+Then export the environment it prints and build each target:
+
+```console
+$ export CC_aarch64_unknown_linux_musl=.../aarch64-linux-musl-gcc \
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=... \
+      RUSTFLAGS="-L $PWD/.miniouto/sysroots/aarch64-musl/lib"
+$ python3 scripts/build_compositor.py --target aarch64-unknown-linux-musl
+```
+
+- musl targets produce a statically-linked binary (no `lib/` bundled)
+- glibc cross targets need `VWAYLAND_SYSROOT_LIB=<sysroot>/lib` so the bundler
+  can find the target's pixman/xkbcommon `.so` files (foreign binaries cannot
+  be inspected with the host `ldd`)
+
+### Platform wheels
+
+`python -m build` produces one `py3-none-any` wheel containing every bundled
+platform. Split it into correctly-tagged per-platform wheels before release:
+
+```console
+$ python3 scripts/make_wheels.py
+```
+
+Each output wheel keeps only its own `_native/<tag>/` directory and is tagged
+`py3-none-<platform-tag>` with `Root-Is-Purelib: false`, so pip refuses to
+install it on the wrong platform.
 
 ### Wheel build
 
@@ -68,9 +107,11 @@ $ python3 scripts/build_compositor.py
 $ python3 -m build --wheel
 ```
 
-The binary and libs in `_native/` are included in the wheel. For releases, run
-`build_compositor.py` on an old-glibc environment (e.g. manylinux_2_28) to
-maximize compatibility.
+The per-platform bundles in `_native/<tag>/` are included in the wheel (the
+directory is gitignored, so it is force-included). For releases, run
+`build_compositor.py` on an old-glibc environment (e.g. manylinux_2_28) for the
+glibc targets to maximize compatibility, then run `make_wheels.py` to produce
+the per-platform wheels.
 
 ## Releasing (PyPI, GitHub Actions)
 
@@ -78,9 +119,11 @@ Releases are automated through `.github/workflows/release.yml`:
 
 1. A tag push matching `v*.*.*` triggers the pipeline.
 2. The `build` job runs inside a `manylinux_2_28` container (glibc 2.28
-   baseline): installs Rust, builds and bundles the compositor, verifies the
-   tag matches `pyproject.toml`'s `version`, runs the test suite, and builds
-   the sdist + wheel.
+   baseline): installs Rust + cross targets, prepares cross sysroots
+   (`prepare_sysroots.py`), builds and bundles the compositor for every
+   supported platform, verifies the tag matches `pyproject.toml`'s `version`,
+   runs the test suite, builds the sdist + base wheel, and splits it into
+   per-platform wheels (`make_wheels.py`).
 3. The `publish` job uploads to PyPI with **Trusted Publishing (OIDC)** — no
    API token is stored anywhere.
 

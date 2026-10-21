@@ -3,6 +3,13 @@ name: release
 # Tag push (vX.Y.Z) triggers a PyPI release via Trusted Publishing (OIDC, no token).
 # One-time PyPI setup is required: a "pending publisher" for this repo/workflow/
 # environment (see docs/development.md).
+#
+# Build strategy: one manylinux_2_28 x86_64 container builds the host wheel,
+# then cross-compiles the compositor for every supported target (aarch64,
+# riscv64, and the musl variants) with prebuilt toolchains, bundles each into
+# _native/<platform-tag>/, and finally splits the any-wheel into per-platform
+# wheels via scripts/make_wheels.py. Wrong-platform pip installs then fail at
+# resolve time instead of crashing at runtime.
 
 on:
   push:
@@ -13,22 +20,39 @@ on:
 permissions:
   contents: read
 
+env:
+  # Rust targets to build (host x86_64-gnu is always built by build_compositor.py
+  # without --target). These are the cross targets.
+  CROSS_TARGETS: >
+    aarch64-unknown-linux-gnu
+    riscv64gc-unknown-linux-gnu
+    x86_64-unknown-linux-musl
+    aarch64-unknown-linux-musl
+
 jobs:
   build:
-    name: Build compositor, test, and build distributions
+    name: Build compositor (all targets), test, and build distributions
     runs-on: ubuntu-latest
-    # Build on manylinux_2_28 so the bundled binary works on glibc >= 2.28.
+    # Build on manylinux_2_28 so the bundled glibc binaries work on glibc >= 2.28.
     container: quay.io/pypa/manylinux_2_28_x86_64
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system build dependencies
-        run: yum install -y pkg-config pixman-devel libxkbcommon-devel
+        run: yum install -y pkg-config pixman-devel libxkbcommon-devel bison flex
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain + cross targets
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target add aarch64-unknown-linux-gnu riscv64gc-unknown-linux-gnu \
+            x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+      - name: Install meson (for pixman/libxkbcommon cross sysroots)
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH"
+          python -m pip install --upgrade pip
+          python -m pip install meson ninja patchelf build
 
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
@@ -41,23 +65,52 @@ jobs:
             exit 1
           fi
 
-      - name: Build compositor and bundle native libraries
+      - name: Prepare cross toolchains and sysroots
         run: |
           export PATH="/opt/python/cp312-cp312/bin:$PATH"
-          python -m pip install --upgrade pip
-          command -v patchelf || python -m pip install patchelf
-          python scripts/build_compositor.py
+          python scripts/prepare_sysroots.py
 
-      - name: Run tests
+      - name: Build and bundle all compositor targets
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH:$HOME/.cargo/bin"
+          set -e
+          # Host (x86_64 glibc)
+          python scripts/build_compositor.py
+          # Cross targets
+          TC="$PWD/.miniouto/toolchains"
+          SR="$PWD/.miniouto/sysroots"
+          for t in $CROSS_TARGETS; do
+            env_name=$(echo "$t" | tr 'a-z-' 'A-Z_')
+            case "$t" in
+              *musl) gcc_pre="${t%%-unknown-linux-musl}-linux-musl"; sys="$SR/${t%%-*}-musl/lib" ;;
+              aarch64-*) gcc_pre="aarch64-linux"; sys="$SR/aarch64-gnu/lib" ;;
+              riscv64gc-*) gcc_pre="riscv64-linux"; sys="$SR/riscv64-gnu/lib" ;;
+            esac
+            tc_dir=$(ls -d $TC/*/ | while read d; do [ -x "$d/bin/$gcc_pre-gcc" ] && echo "$d"; done | head -1)
+            export CC_${env_name}="$tc_dir/bin/$gcc_pre-gcc"
+            export CARGO_TARGET_${env_name}_LINKER="$tc_dir/bin/$gcc_pre-gcc"
+            export RUSTFLAGS="-L $sys"
+            export VWAYLAND_SYSROOT_LIB="$sys"
+            python scripts/build_compositor.py --target "$t"
+            unset RUSTFLAGS VWAYLAND_SYSROOT_LIB CC_${env_name} CARGO_TARGET_${env_name}_LINKER
+          done
+
+      - name: Run tests (native x86_64)
         run: |
           export PATH="/opt/python/cp312-cp312/bin:$PATH"
           python -m unittest discover -s tests -v
 
-      - name: Build sdist and wheel
+      - name: Build sdist and base wheel
         run: |
           export PATH="/opt/python/cp312-cp312/bin:$PATH"
-          python -m pip install build
           python -m build
+
+      - name: Split into per-platform wheels
+        run: |
+          export PATH="/opt/python/cp312-cp312/bin:$PATH"
+          python scripts/make_wheels.py
+          echo "== distributions =="
+          ls -la dist/
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4

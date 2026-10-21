@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import builtins
 import os
+import platform
 import re
 import secrets
 import shutil
@@ -75,6 +76,50 @@ def runtime_root() -> Path:
     return root
 
 
+def _bundled_platform_tag() -> "str | None":
+    """Wheel-style platform tag of the bundled compositor dir for this host.
+
+    Returns e.g. "manylinux_2_28_x86_64" / "musllinux_1_2_aarch64", or None on
+    non-Linux hosts. Used to pick which ``_native/<tag>/`` directory to load.
+    """
+    import sysconfig
+
+    tag = sysconfig.get_platform()  # e.g. linux-x86_64, linux-aarch64
+    if not tag.startswith("linux-"):
+        return None
+    arch = tag[len("linux-"):].replace("-", "_")
+    if arch == "linux":  # some builds report just "linux"
+        arch = platform.machine() or "x86_64"
+    libc_kind = "musllinux_1_2" if _is_musl() else "manylinux_2_28"
+    return f"{libc_kind}_{arch}"
+
+
+def _is_musl() -> bool:
+    """Detect musl vs glibc.
+
+    Primary probe: `ldd --version` (musl's ldd prints "musl"; glibc prints
+    "GLIBC"). Fallback: scan the libc mapped into this process.
+    """
+    ldd = shutil.which("ldd")
+    if ldd:
+        try:
+            out = subprocess.run(
+                [ldd, "--version"], capture_output=True, timeout=5
+            )
+            banner = (out.stdout + out.stderr).lower()
+            if b"musl" in banner:
+                return True
+            if b"glibc" in banner or b"gnu" in banner:
+                return False
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        with open("/proc/self/maps", "rb") as f:
+            return b"musl" in f.read()
+    except OSError:
+        return False
+
+
 def _find_binary(compositor_bin: "str | os.PathLike[str] | None" = None) -> Path:
     candidates: list[Path] = []
     env = os.environ.get("VWAYLAND_COMPOSITOR_BIN")
@@ -82,7 +127,12 @@ def _find_binary(compositor_bin: "str | os.PathLike[str] | None" = None) -> Path
         candidates.append(Path(compositor_bin))
     if env:
         candidates.append(Path(env))
-    candidates.append(Path(__file__).resolve().parent / "_native" / "vwayland-compositor")
+    native_dir = Path(__file__).resolve().parent / "_native"
+    tag = _bundled_platform_tag()
+    if tag:
+        candidates.append(native_dir / tag / "vwayland-compositor")
+    # Legacy flat layout (single-platform builds) and PATH.
+    candidates.append(native_dir / "vwayland-compositor")
     which = shutil.which("vwayland-compositor")
     if which:
         candidates.append(Path(which))
@@ -90,8 +140,9 @@ def _find_binary(compositor_bin: "str | os.PathLike[str] | None" = None) -> Path
         if path.is_file() and os.access(path, os.X_OK):
             return path
     raise CompositorStartError(
-        "vwayland-compositor binary not found. "
-        "Build it with scripts/build_compositor.py or set VWAYLAND_COMPOSITOR_BIN. "
+        f"vwayland-compositor binary not found for this platform ({tag or 'non-Linux'}). "
+        "Install a wheel built for this platform, build it with "
+        "scripts/build_compositor.py, or set VWAYLAND_COMPOSITOR_BIN. "
         f"(tried: {[str(c) for c in candidates]})"
     )
 

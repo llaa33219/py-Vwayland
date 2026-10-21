@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "py-Vwayland"
-version = "0.2.0"
+version = "0.3.0"
 description = "Spawn virtual Wayland compositors from Python to capture and control GUI programs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -43,11 +43,15 @@ Source = "https://github.com/llaa33219/py-Vwayland"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vwayland"]
+# Native artifacts are gitignored; they are force-included below instead.
+exclude = ["src/vwayland/_native"]
 # The native binary/libs are gitignored, so pull them in explicitly.
 # Build fails loudly when they are missing (run scripts/build_compositor.py first).
 [tool.hatch.build.targets.wheel.force-include]
-"src/vwayland/_native/vwayland-compositor" = "vwayland/_native/vwayland-compositor"
-"src/vwayland/_native/lib" = "vwayland/_native/lib"
+# Per-platform native bundles (_native/<platform-tag>/{vwayland-compositor,lib/}).
+# make_wheels.py later splits the any-wheel into one correctly-tagged wheel
+# per platform directory found here.
+"src/vwayland/_native" = "vwayland/_native"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -64,5 +68,4 @@ include = [
 # `python -m build` builds the wheel from the sdist, so the native artifacts
 # must be present in the sdist as well (same force-include as the wheel).
 [tool.hatch.build.targets.sdist.force-include]
-"src/vwayland/_native/vwayland-compositor" = "src/vwayland/_native/vwayland-compositor"
-"src/vwayland/_native/lib" = "src/vwayland/_native/lib"
+"src/vwayland/_native" = "src/vwayland/_native"
