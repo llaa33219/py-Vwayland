@@ -22,7 +22,6 @@ import os
 import subprocess
 import sys
 import tarfile
-import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -88,7 +87,11 @@ def fetch(url: str, dest: Path) -> None:
     if dest.exists():
         return
     print(f"downloading {url}")
-    urllib.request.urlretrieve(url, dest)
+    # Use curl: honours proxy env vars (HTTPS_PROXY) that GitHub Actions
+    # containers rely on, unlike urllib's direct connection.
+    subprocess.run(
+        ["curl", "-fsSL", "--retry", "3", "-o", str(dest), url], check=True
+    )
 
 
 def ensure_toolchain(triple: str) -> Path:
